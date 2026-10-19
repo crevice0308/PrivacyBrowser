@@ -172,6 +172,8 @@ def FirefoxBranding():
         targets = [line.strip() for line in configured.decode("utf-8").splitlines()
                    if line.strip().startswith("ac_add_options --target=")]
         self.assertEqual(targets, ["ac_add_options --target=x86_64-pc-windows-msvc"])
+        self.assertIn(b"ac_add_options --enable-warnings-as-errors\n", configured)
+        self.assertIn(b"ac_add_options --disable-geckodriver\n", configured)
         self.prepare()
         self.assertEqual((self.source / "mozconfig").read_bytes(), configured)
 

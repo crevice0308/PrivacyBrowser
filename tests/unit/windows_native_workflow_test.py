@@ -186,6 +186,49 @@ class NativeWorkflowTests(unittest.TestCase):
         self.assertLess(capture, evidence)
         self.assertLess(evidence, failure)
 
+    def test_source_archive_build_clears_mozilla_ci_flags_only_in_child(self):
+        shell = (ROOT / "tools/build_windows_native.sh").read_text()
+        powershell = (ROOT / "tools/build_windows_native.ps1").read_text()
+        self.assertIn("unset MOZ_AUTOMATION MOZ_FETCHES_DIR", shell)
+        self.assertNotIn("export MOZ_AUTOMATION=", shell)
+        self.assertNotIn("export MOZ_FETCHES_DIR=", shell)
+        self.assertIn("$env:MOZ_AUTOMATION = '1'", powershell)
+        self.assertIn('export MOZBUILD_STATE_PATH="$work_windows/mozbuild"', shell)
+        self.assertIn("ac_add_options --enable-bootstrap", powershell)
+        self.assertLess(shell.index("unset MOZ_AUTOMATION MOZ_FETCHES_DIR"),
+                        shell.index("run_logged rust-toolchain"))
+        self.assertNotIn("git init", shell + powershell)
+        self.assertNotIn("hg init", shell + powershell)
+        self.assertIn('run_logged winchecksec-hash sha256sum "$PB_WORK_UNIX/mozbuild/winchecksec/winchecksec.exe"', shell)
+        self.assertIn('export WINCHECKSEC="$work_windows/mozbuild/winchecksec/winchecksec.exe"', shell)
+        self.assertLess(shell.index("run_logged winchecksec-hash"), shell.index("run_logged build ./mach"))
+        self.assertIn('"source_indexed_pdbs_claimed":false', shell)
+
+    def test_rust_uses_exact_source_defined_download_not_hosted_path(self):
+        shell = (ROOT / "tools/build_windows_native.sh").read_text()
+        powershell = (ROOT / "tools/build_windows_native.ps1").read_text()
+        pin = json.loads((ROOT / "config/windows-native-toolchain.json").read_text())
+        self.assertEqual(pin["reviewed_rust_task"], "win64-rust-1.94")
+        self.assertEqual(pin["reviewed_rust_version"], "1.94.1")
+        self.assertEqual(pin["reviewed_rust_definition_sha256"],
+                         "ee1a8a3cb24c9784b1f6764528100279c682a6aa326bbb983a2a81085a3bdd39")
+        self.assertIn("Assert-Hash (Join-Path $Source 'taskcluster\\kinds\\toolchain\\rust.yml') "
+                      "$Pin.reviewed_rust_definition_sha256", powershell)
+        self.assertIn("$env:PB_RUST_TASK = $Pin.reviewed_rust_task", powershell)
+        self.assertIn("$env:PB_RUST_VERSION = $Pin.reviewed_rust_version", powershell)
+        self.assertIn('mkdir "$PB_WORK_UNIX/rust-toolchain" &&', shell)
+        self.assertIn('--from-build "$PB_RUST_TASK"', shell)
+        self.assertIn('--artifact-manifest "$work_windows/evidence/rust-toolchain-artifacts.json"', shell)
+        self.assertIn('run_logged rust-integrity python3 "$script_dir/verify_rust_toolchain.py"', shell)
+        self.assertLess(shell.index("run_logged rust-integrity"), shell.index("run_logged rustc-version"))
+        self.assertLess(shell.index("run_logged rust-integrity"), shell.index("run_logged cargo-version"))
+        self.assertIn('export RUSTC="$(cygpath -m "$rust_bin/rustc.exe")"', shell)
+        self.assertIn('export CARGO="$(cygpath -m "$rust_bin/cargo.exe")"', shell)
+        for phase in ("rust-binary-hashes", "rustc-version", "cargo-version", "rust-version-check", "rust-host-check"):
+            self.assertLess(shell.index("run_logged " + phase), shell.index("run_logged bootstrap python3"))
+        self.assertIn("host: x86_64-pc-windows-msvc", shell)
+        self.assertNotIn("rustup update", shell)
+
     def test_mozillabuild_uses_fresh_vendor_default_and_retains_attempt_evidence(self):
         source = (ROOT / "tools/build_windows_native.ps1").read_text(encoding="utf-8")
         self.assertIn("$MozillaBuild = 'C:\\mozilla-build'", source)

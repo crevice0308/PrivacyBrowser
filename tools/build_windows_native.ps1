@@ -46,6 +46,8 @@ $env:PIP_CACHE_DIR = Join-Path $Work 'pip-cache'
 $env:PIP_DISABLE_PIP_VERSION_CHECK = '1'
 $env:MOZBUILD_STATE_PATH = Join-Path $Work 'mozbuild'
 $env:MACH_TELEMETRY_NO_SUBMIT = '1'
+# Runtime tests need the Windows launcher to wait for its browser child.
+# The source-archive build shell explicitly clears this Mozilla-CI-only flag.
 $env:MOZ_AUTOMATION = '1'
 $env:MOZ_CRASHREPORTER_NO_REPORT = '1'
 
@@ -170,6 +172,9 @@ Invoke-Python @((Join-Path $Repo 'tools\extract_source.py'), '--archive', $Archi
 # Fail closed if the safety behavior of the pinned release bootstrap changes.
 Assert-Hash (Join-Path $Source 'python\mozboot\mozboot\bootstrap.py') $Pin.reviewed_bootstrap_sha256
 Assert-Hash (Join-Path $Source 'python\mozboot\mozboot\mach_commands.py') $Pin.reviewed_mach_bootstrap_sha256
+Assert-Hash (Join-Path $Source 'taskcluster\kinds\toolchain\rust.yml') $Pin.reviewed_rust_definition_sha256
+$env:PB_RUST_TASK = $Pin.reviewed_rust_task
+$env:PB_RUST_VERSION = $Pin.reviewed_rust_version
 Invoke-Python @((Join-Path $Repo 'tools\prepare_source.py'), '--source', $Source, '--target', 'windows')
 Copy-Item "$Archive.verification.json" (Join-Path $Evidence 'source-verification.json')
 Copy-Item (Join-Path $Source 'PRIVACY_BROWSER_SOURCE_PREPARATION.json') (Join-Path $Evidence 'source-preparation.json')
