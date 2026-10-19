@@ -194,7 +194,14 @@ $checks.locked_payload_uninstall_refused = $true
 # preferences are changed, and the test terminates only its own process tree.
 $browserProfile = Join-Path $WorkRoot 'active-browser-profile'
 New-Item -ItemType Directory -Path $browserProfile | Out-Null
-$browser = Start-Process -FilePath $exe -ArgumentList @('--headless', '--no-remote', '--profile', $browserProfile, 'about:blank') -RedirectStandardOutput (Join-Path $WorkRoot 'active-browser.stdout.log') -RedirectStandardError (Join-Path $WorkRoot 'active-browser.stderr.log') -PassThru
+# Retain only these two diagnostic streams with the report, including failure.
+# Never upload the installer-test directory containing profiles and binaries.
+$browserStdout = Join-Path (Split-Path -Parent $Output) 'active-browser.stdout.log'
+$browserStderr = Join-Path (Split-Path -Parent $Output) 'active-browser.stderr.log'
+foreach ($log in @($browserStdout, $browserStderr)) {
+    Assert-True (-not (Test-Path -LiteralPath $log)) 'An active-browser diagnostic log already exists; it will not be overwritten.'
+}
+$browser = Start-Process -FilePath $exe -ArgumentList @('--headless', '--no-remote', '--profile', $browserProfile, 'about:blank') -RedirectStandardOutput $browserStdout -RedirectStandardError $browserStderr -PassThru
 try {
     Start-Sleep -Seconds 5
     $browser.Refresh()

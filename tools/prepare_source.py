@@ -42,6 +42,21 @@ def startup_error_caption(text: str) -> str:
     )
 
 
+def upstream_installer_packaging(text: str) -> str:
+    """Match the Windows installer recursion to its existing build-directory gate."""
+    original = '''ifeq (WINNT,$(OS_ARCH))
+ifeq ($(MOZ_PKG_FORMAT),ZIP)
+\t$(MAKE) -C windows ZIP_IN='$(ABS_DIST)/$(PACKAGE)' installer
+endif
+endif'''
+    # browser/moz.build creates installer/windows only when MAKENSISU is set.
+    # Keep the ordinary package, sourcestamp and automation paths unchanged.
+    replacement = original.replace(
+        "\t$(MAKE) -C windows", "ifdef MAKENSISU\n\t$(MAKE) -C windows"
+    ).replace("\nendif\nendif", "\nendif # MAKENSISU\nendif\nendif")
+    return replace_one(text, re.escape(original), replacement, "upstream Windows package installer recursion")
+
+
 def regular_file(root: Path, relative: str) -> Path:
     path = root / relative
     if not path.is_file() or any(part.is_symlink() for part in (path, *path.parents) if part != root.parent):
@@ -258,6 +273,19 @@ def branding_plan(source: Path, overlay: Path) -> dict[Path, bytes]:
         root_configure.read_text(encoding="utf-8"), re.escape(nsis_check),
         nsis_check.replace("when=target_is_windows,", 'when=target_is_windows & depends(moz_app_basename)(lambda name: name != "PrivacyBrowser"),'),
         "upstream NSIS installer discovery",
+    ).encode("utf-8")
+    packager = regular_file(source, "toolkit/mozapps/installer/packager.mk")
+    changes[packager] = upstream_installer_packaging(packager.read_text(encoding="utf-8")).encode("utf-8")
+    # The xpcshell harness selects <branded appname>-appdir from the manifest;
+    # without this alias it silently uses dist/bin instead of dist/bin/browser.
+    places_manifest = regular_file(source, "toolkit/components/places/tests/unit/xpcshell.toml")
+    places_text = places_manifest.read_text(encoding="utf-8")
+    if "privacybrowser-appdir" in places_text:
+        raise ValueError("ESR has an unreviewed PrivacyBrowser xpcshell application directory")
+    changes[places_manifest] = replace_one(
+        places_text, r'^firefox-appdir = "browser"$',
+        'firefox-appdir = "browser"\nprivacybrowser-appdir = "browser"',
+        "Places xpcshell native app directory",
     ).encode("utf-8")
     return changes
 

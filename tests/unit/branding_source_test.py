@@ -8,6 +8,7 @@ import io
 import json
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -67,6 +68,15 @@ class NativeBrandingSourceTests(unittest.TestCase):
             "browser/config/version.txt": pinned.removesuffix("esr") + "\n",
             "browser/config/version_display.txt": pinned + "\n",
             "browser/installer/package-manifest.in": "; fixture\n@BINPATH@/firefox.VisualElementsManifest.xml\n",
+            "toolkit/mozapps/installer/packager.mk": LEGAL + '''make-package: FORCE
+\t$(MAKE) make-package-internal
+ifeq (WINNT,$(OS_ARCH))
+ifeq ($(MOZ_PKG_FORMAT),ZIP)
+\t$(MAKE) -C windows ZIP_IN='$(ABS_DIST)/$(PACKAGE)' installer
+endif
+endif
+''',
+            "toolkit/components/places/tests/unit/xpcshell.toml": '[DEFAULT]\nfirefox-appdir = "browser"\n\n["test_isURIVisited.js"]\n',
             "browser/components/sessionstore/SessionFile.sys.mjs": session_patch.READ_ANCHOR + "\n  },\n" + session_patch.WRITE_ANCHOR + "\n  }\n",
             "browser/app/nsBrowserApp.cpp": LEGAL + '''// Firefox attribution remains unchanged.
         messageBoxW(nullptr, wide_msg, L"Firefox",
@@ -296,11 +306,62 @@ def FirefoxBranding():
         self.assertIn('when=target_is_windows & depends(moz_app_basename)(lambda name: name != "PrivacyBrowser"),', root)
         self.assertIn("--disable-default-browser-agent", (self.source / "mozconfig").read_text())
         self.assertNotIn("--disable-installer", (self.source / "mozconfig").read_text())
+        package = (self.source / "toolkit/mozapps/installer/packager.mk").read_text(encoding="utf-8")
+        self.assertIn("make-package: FORCE\n\t$(MAKE) make-package-internal", package)
+        self.assertIn("ifeq ($(MOZ_PKG_FORMAT),ZIP)\nifdef MAKENSISU\n\t$(MAKE) -C windows", package)
+
+    def test_changed_or_duplicate_package_installer_recursion_is_fail_closed(self):
+        path = self.source / "toolkit/mozapps/installer/packager.mk"
+        original = path.read_text(encoding="utf-8")
+        for changed in (original.replace("-C windows", "-C unexpected"), original + original):
+            with self.subTest(changed=changed):
+                path.write_text(changed, encoding="utf-8", newline="\n")
+                self.assert_rejected_unchanged()
+
+    @unittest.skipUnless(shutil.which("make"), "GNU Make is required for the inert packaging fixture")
+    def test_package_make_rule_keeps_zip_and_only_calls_configured_installer(self):
+        # No browser or installer runs. The two recipes only print fixed markers.
+        path = self.source / "toolkit/mozapps/installer/packager.mk"
+        fixture = self.source / "Makefile"
+        base = path.read_text(encoding="utf-8")
+        tail = "\n.PHONY: FORCE make-package make-package-internal\nFORCE:\nmake-package-internal:\n\t@echo PACKAGE_OK\n"
+        fixture.write_text(base + tail, encoding="utf-8", newline="\n")
+        def run(*options):
+            return subprocess.run([shutil.which("make"), "--no-print-directory", "-f", str(fixture),
+                                   "make-package", "OS_ARCH=WINNT", "MOZ_PKG_FORMAT=ZIP", *options],
+                                  cwd=self.source, capture_output=True, text=True, timeout=20)
+        self.assertNotEqual(run("MAKENSISU=").returncode, 0)
+        fixture.write_text(prepare_source.upstream_installer_packaging(base) + tail, encoding="utf-8", newline="\n")
+        without_installer = run("MAKENSISU=")
+        self.assertEqual(without_installer.returncode, 0, without_installer.stderr)
+        self.assertIn("PACKAGE_OK", without_installer.stdout)
+        windows = self.source / "windows"
+        windows.mkdir()
+        (windows / "Makefile").write_text("installer:\n\t@echo INSTALLER_OK\n", encoding="utf-8", newline="\n")
+        with_installer = run("MAKENSISU=fixture")
+        self.assertEqual(with_installer.returncode, 0, with_installer.stderr)
+        self.assertIn("PACKAGE_OK", with_installer.stdout)
+        self.assertIn("INSTALLER_OK", with_installer.stdout)
 
     def test_changed_nsis_discovery_is_fail_closed(self):
         path = self.source / "moz.configure"
         path.write_text(path.read_text().replace('bootstrap="nsis/bin"', 'bootstrap="changed/nsis"'), encoding="utf-8", newline="\n")
         self.assert_rejected_unchanged()
+
+    def test_places_xpcshell_keeps_native_application_directory(self):
+        self.prepare()
+        manifest = (self.source / "toolkit/components/places/tests/unit/xpcshell.toml").read_text(encoding="utf-8")
+        self.assertEqual(manifest, '[DEFAULT]\nfirefox-appdir = "browser"\nprivacybrowser-appdir = "browser"\n\n["test_isURIVisited.js"]\n')
+
+    def test_changed_or_duplicate_places_appdir_is_fail_closed(self):
+        path = self.source / "toolkit/components/places/tests/unit/xpcshell.toml"
+        original = path.read_text(encoding="utf-8")
+        for changed in (original.replace('firefox-appdir = "browser"', 'firefox-appdir = "unexpected"'),
+                        original + '\nfirefox-appdir = "browser"\n',
+                        original.replace('[DEFAULT]', '[DEFAULT]\nprivacybrowser-appdir = "browser"')):
+            with self.subTest(changed=changed):
+                path.write_text(changed, encoding="utf-8", newline="\n")
+                self.assert_rejected_unchanged()
 
     def test_missing_native_resource_is_fail_closed(self):
         (self.brand / "firefox.ico").unlink()

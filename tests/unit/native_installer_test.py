@@ -1016,6 +1016,17 @@ class HostedInstallerTestContractTests(unittest.TestCase):
         for check in ("locked_payload_uninstall_refused", "active_browser_uninstall_refused"):
             self.assertIn(f"$checks.{check} = $true", self.commands)
 
+    def test_active_browser_logs_are_retained_without_uploading_profiles(self):
+        for variable, filename in (("$browserStdout", "active-browser.stdout.log"),
+                                   ("$browserStderr", "active-browser.stderr.log")):
+            self.assertIn(f"{variable} = Join-Path (Split-Path -Parent $Output) '{filename}'", self.commands)
+        self.assertIn("-RedirectStandardOutput $browserStdout -RedirectStandardError $browserStderr", self.commands)
+        self.assertLess(self.commands.index("-not (Test-Path -LiteralPath $log)"),
+                        self.commands.index("$browser = Start-Process"))
+        workflow = (ROOT / ".github/workflows/windows-native.yml").read_text(encoding="utf-8")
+        self.assertIn("path: D:/pb/evidence/", workflow)
+        self.assertNotIn("path: D:/pb/installer-test", workflow)
+
     def test_keep_then_explicit_purge_are_verified_without_claiming_full_gui_acceptance(self):
         for check in ("exact_payload_hashes", "uninstall_exact_payload_and_metadata",
                       "profile_download_unknown_file_retention", "default_silent_retains_user_data",
