@@ -172,6 +172,29 @@ class NativeWorkflowTests(unittest.TestCase):
         self.assertNotIn("Set-MpPreference", source)
         self.assertNotIn("Add-MpPreference", source)
 
+    def test_mozillabuild_uses_fresh_vendor_default_and_retains_attempt_evidence(self):
+        source = (ROOT / "tools/build_windows_native.ps1").read_text(encoding="utf-8")
+        self.assertIn("$MozillaBuild = 'C:\\mozilla-build'", source)
+        self.assertIn("$Work = 'D:\\pb'", source)
+        self.assertIn("$SystemDrive.Free -lt 8GB", source)
+        self.assertIn("Get-ChildItem -LiteralPath 'C:\\' -Force -Filter 'mozilla-build'", source)
+        self.assertEqual(source.count("\nAssert-FreshMozillaBuildPath\n"), 2)
+        launch = source.index("$Process = Start-Process -FilePath $Installer")
+        self.assertLess(source.rindex("\nAssert-FreshMozillaBuildPath\n"), launch)
+        self.assertIn("-ArgumentList @('/S') -PassThru", source)
+        self.assertNotIn('"/D=$MozillaBuild"', source)
+        self.assertIn("$Process.WaitForExit(600000)", source)
+        self.assertIn("$Process.Refresh()", source)
+        for field in ("exit_code = $InstallExitCode", "expected_files = $ExpectedFiles",
+                      "top_level_names = $TopLevelNames", "root_is_safe_directory = $InstallRootSafe"):
+            self.assertIn(field, source)
+        self.assertIn("Select-Object -First 32 -ExpandProperty Name", source)
+        evidence = source.index("'mozilla-build-install-attempt.json'")
+        failure = source.index("throw 'MozillaBuild installation failed;")
+        self.assertLess(evidence, failure)
+        self.assertLess(source.index("Get-AuthenticodeSignature"), launch)
+        self.assertLess(source.index("Assert-Hash $License $Pin.license_sha256"), launch)
+
     def test_candidate_preparation_never_starts_native_program(self):
         evidence = self.root / "evidence"
         evidence.mkdir()
