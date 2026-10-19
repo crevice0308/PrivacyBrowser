@@ -195,6 +195,19 @@ class NativeWorkflowTests(unittest.TestCase):
         self.assertLess(source.index("Get-AuthenticodeSignature"), launch)
         self.assertLess(source.index("Assert-Hash $License $Pin.license_sha256"), launch)
 
+    def test_gpg_identity_diagnostics_drain_output_before_truncating(self):
+        source = (ROOT / "tools/build_windows_native.ps1").read_text(encoding="utf-8")
+        capture = source.index("$GpgVersionOutput = @(& $GpgPath --no-options --batch --version 2>&1)")
+        status = source.index("$GpgVersionExit = $LASTEXITCODE")
+        truncate = source.index("$GpgVersionOutput | Select-Object -First 2")
+        evidence = source.index("'gpg-toolchain.json'")
+        provision = source.index("'tools\\provision_upstream_key.py')")
+        self.assertLess(capture, status)
+        self.assertLess(status, truncate)
+        self.assertLess(truncate, evidence)
+        self.assertLess(evidence, provision)
+        self.assertIn("[math]::Min(256", source)
+
     def test_candidate_preparation_never_starts_native_program(self):
         evidence = self.root / "evidence"
         evidence.mkdir()

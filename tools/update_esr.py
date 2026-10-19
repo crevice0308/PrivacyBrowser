@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import re
+import shutil
 import subprocess
 import tempfile
 from urllib.parse import urlparse
@@ -22,6 +23,32 @@ VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+(?:\.[0-9]+)?esr$")
 FINGERPRINT_RE = re.compile(r"^(?:[A-F0-9]{40}|[A-F0-9]{64})$")
 ALLOWED_HOSTS = {"archive.mozilla.org", "product-details.mozilla.org"}
 METADATA_URL = "https://product-details.mozilla.org/1.0/firefox_versions.json"
+
+
+def run_gpg(arguments: list[str], home: Path, operation: str) -> subprocess.CompletedProcess:
+    """Use one isolated cwd and relative filenames with native or MSYS GPG.
+
+    Native Python supplies cwd through the Windows process API. Avoid passing
+    drive-letter/backslash paths through a POSIX GPG argument parser altogether.
+    The explicit homedir also prevents reading a personal/default key store.
+    """
+    executable = shutil.which("gpg") or "gpg"
+    command = [executable, "--no-options", "--batch", "--no-tty", "--homedir", ".", *arguments]
+    try:
+        result = subprocess.run(command, cwd=home, stdin=subprocess.DEVNULL,
+                                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                timeout=60, check=False)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        detail = {"operation": operation, "executable": executable,
+                  "error_type": type(error).__name__, "timed_out": isinstance(error, subprocess.TimeoutExpired)}
+        raise ValueError("GPG invocation failed: " + json.dumps(detail, ensure_ascii=True)) from error
+    if result.returncode:
+        # Escape newlines/control characters so public-key text cannot become
+        # a runner command. Bound diagnostics and never dump keys/environment.
+        detail = {"operation": operation, "executable": executable, "exit_code": result.returncode,
+                  "stderr": (result.stderr or "")[:4096], "stderr_truncated": len(result.stderr or "") > 4096}
+        raise ValueError("GPG operation failed: " + json.dumps(detail, ensure_ascii=True))
+    return result
 
 
 def trusted_url(url: str) -> str:
@@ -61,11 +88,13 @@ def verify_signature(checksums: Path, signature: Path, keyring: Path, fingerprin
         raise ValueError("A pre-provisioned trusted keyring is required")
     with tempfile.TemporaryDirectory(prefix="privacybrowser-gpg-") as home:
         os.chmod(home, 0o700)
-        result = subprocess.run(
-            ["gpg", "--batch", "--no-options", "--homedir", home, "--no-default-keyring", "--keyring", str(keyring.resolve()),
-             "--status-fd", "1", "--verify", str(signature.resolve()), str(checksums.resolve())],
-            capture_output=True, text=True, check=False,
-        )
+        isolated = Path(home)
+        # Use byte-identical public inputs with fixed relative names. An MSYS
+        # executable need not interpret any native Windows filename argument.
+        for source, name in ((keyring, "trusted.gpg"), (signature, "checksums.sig"), (checksums, "checksums.txt")):
+            shutil.copyfile(source, isolated / name)
+        result = run_gpg(["--no-default-keyring", "--keyring", "./trusted.gpg", "--status-fd", "1",
+                          "--verify", "checksums.sig", "checksums.txt"], isolated, "verify-checksum-signature")
     valid = []
     # KEYEXPIRED can describe unrelated historical subkeys in the same Mozilla
     # public-key bundle. EXPKEYSIG/REVKEYSIG describe the actual signing key.

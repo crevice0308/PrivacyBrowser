@@ -146,6 +146,16 @@ Invoke-Python @('-m', 'pip', 'install', '--only-binary=:all:', '--require-hashes
     '-r', (Join-Path $Repo 'requirements-build.txt'))
 $Downloads = Join-Path $Work 'downloads'
 $Keyring = Join-Path $Downloads 'mozilla-release.gpg'
+# Record the actual preinstalled implementation selected before public-key use.
+# Do not log its default home, environment, or any key material.
+$GpgPath = (Get-Command gpg -CommandType Application -ErrorAction Stop).Source
+$GpgVersionOutput = @(& $GpgPath --no-options --batch --version 2>&1)
+$GpgVersionExit = $LASTEXITCODE
+$GpgVersion = @($GpgVersionOutput | Select-Object -First 2 |
+    ForEach-Object { ([string]$_).Substring(0, [math]::Min(256, ([string]$_).Length)) })
+[ordered]@{ schema_version = 1; executable = $GpgPath; version_lines = $GpgVersion; exit_code = $GpgVersionExit } |
+    ConvertTo-Json -Depth 3 | Set-Content (Join-Path $Evidence 'gpg-toolchain.json') -Encoding utf8NoBOM
+if ($GpgVersionExit -ne 0) { throw 'Preinstalled GPG version check failed; inspect gpg-toolchain.json.' }
 Invoke-Python @((Join-Path $Repo 'tools\provision_upstream_key.py'), '--output', $Keyring)
 $Trust = Get-Content (Join-Path $Repo 'config\update-trust.json') -Raw | ConvertFrom-Json
 $Fetch = @((Join-Path $Repo 'tools\update_esr.py'), 'fetch', '--version', $Config.upstream_version,

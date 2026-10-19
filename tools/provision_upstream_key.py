@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 import time
 
-from update_esr import download
+from update_esr import download, run_gpg
 
 ROOT = Path(__file__).resolve().parents[1]
 KEY_URL = "https://archive.mozilla.org/pub/firefox/nightly/latest-mozilla-central/KEY"
@@ -23,8 +23,7 @@ def provision(output: Path, trust_file: Path) -> None:
         home = Path(temporary)
         key = home / "KEY"
         download(KEY_URL, key, 2 * 1024 * 1024)
-        command = ["gpg", "--no-options", "--batch", "--homedir", str(home)]
-        listing = subprocess.run(command + ["--with-colons", "--show-keys", str(key)], check=True, capture_output=True, text=True)
+        listing = run_gpg(["--with-colons", "--show-keys", "KEY"], home, "inspect-official-public-key")
         found_primaries, found_subkeys = set(), set()
         previous = None
         for line in listing.stdout.splitlines():
@@ -43,7 +42,7 @@ def provision(output: Path, trust_file: Path) -> None:
         # Dearmor only after checking identity pins, then verify_signature() also
         # restricts the exact primary AND current signing subkey on every use.
         keyring = home / "verified-public-key.gpg"
-        subprocess.run(command + ["--dearmor", "--output", str(keyring), str(key)], check=True, capture_output=True)
+        run_gpg(["--dearmor", "--output", keyring.name, "KEY"], home, "dearmor-pinned-public-key")
         exported = keyring.read_bytes()
         if not exported:
             raise ValueError("No pinned public key was exported")
@@ -56,4 +55,7 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--trust", type=Path, default=ROOT / "config/update-trust.json")
     args = parser.parse_args()
-    provision(args.output, args.trust)
+    try:
+        provision(args.output, args.trust)
+    except (ValueError, OSError, subprocess.SubprocessError) as error:
+        raise SystemExit("Public-key provisioning refused: " + str(error))
