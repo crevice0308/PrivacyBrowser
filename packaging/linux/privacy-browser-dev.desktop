@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Privacy Browser (Developer)
+Comment=Experimental Privacy Browser on Firefox ESR
+Exec=privacy-browser-dev %u
+Icon=privacy-browser-dev
+Terminal=false
+Categories=Network;WebBrowser;
+MimeType=text/html;x-scheme-handler/http;x-scheme-handler/https;
+StartupNotify=true
+StartupWMClass=privacybrowser-dev

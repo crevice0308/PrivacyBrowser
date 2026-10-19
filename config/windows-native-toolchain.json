@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "mozilla_build_version": "4.2.1",
+  "installer_url": "https://archive.mozilla.org/pub/mozilla/libraries/win32/MozillaBuildSetup-4.2.1.exe",
+  "installer_bytes": 175671840,
+  "installer_sha256": "8ef5b3d2087e4867dc75bf19f5e62f12e917f518239415723cc70896b6f1e3d8",
+  "signer_certificate_sha256": "6bfc0ae7ad878d4dbf9e9ec9d09535b0c65b083acd5d58a71c1e883323bb52b3",
+  "signer_common_name": "Mozilla Corporation",
+  "license_url": "https://hg.mozilla.org/mozilla-build/raw-file/36d6e180a593b46d45db555cd44b2f9f80ef25ca/license.rtf",
+  "license_sha256": "205e78734b85c60edaf8ebcfc1e0701d10a417b2102a386983005eaf8dbaa3d9",
+  "license_accepted_for_ephemeral_github_windows_runner": true,
+  "reviewed_esr": "153.5.0esr",
+  "reviewed_bootstrap_sha256": "25646fa9e755b78f50cedb331a4a9bc778a1b6af39f572d85f4cccd27f6004d6",
+  "reviewed_mach_bootstrap_sha256": "ec806ac19717f8becb71851b2dfa1a26e5ef37574ae623da338ec871eb276d22",
+  "review_note": "Installer digest independently matched two HTTPS downloads from the official archive. Embedded signer certificate was inspected without execution. Windows must additionally validate Authenticode before installation. Exact release license matches the accepted license bytes. No persistent installation or security-setting changes are authorized."
+}

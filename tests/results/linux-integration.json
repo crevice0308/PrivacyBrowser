@@ -1,0 +1,234 @@
+{
+  "schema": 1,
+  "platform": "Linux",
+  "binary": "firefox",
+  "sandbox_disabled": false,
+  "tests": [
+    {
+      "name": "window-controls",
+      "status": "pass"
+    },
+    {
+      "name": "URL-only-preference",
+      "status": "pass"
+    },
+    {
+      "name": "privacy-startup",
+      "status": "pass"
+    },
+    {
+      "name": "privileged-home-search-UI",
+      "status": "pass"
+    },
+    {
+      "name": "privileged-settings-UI",
+      "status": "pass"
+    },
+    {
+      "name": "native-task-manager",
+      "status": "pass"
+    },
+    {
+      "name": "unicodeSearchHistory",
+      "status": "pass"
+    },
+    {
+      "name": "searchCleared",
+      "status": "pass"
+    },
+    {
+      "name": "cookieCleared",
+      "status": "pass"
+    },
+    {
+      "name": "bookmarkRetained",
+      "status": "pass"
+    },
+    {
+      "name": "diagnosticsDefaultOff",
+      "status": "pass"
+    },
+    {
+      "name": "native-diagnostics-exported",
+      "status": "pass"
+    },
+    {
+      "name": "native-diagnostics-bounded",
+      "status": "pass"
+    },
+    {
+      "name": "native-diagnostics-deleted",
+      "status": "pass"
+    },
+    {
+      "name": "native-diagnostics-ZIP-no-secret",
+      "status": "pass"
+    },
+    {
+      "name": "Brave-search-dispatch",
+      "status": "pass"
+    },
+    {
+      "name": "Brave-search-results",
+      "status": "blocked",
+      "reason": "Content rendering in this execution sandbox is not qualified; search results not validated."
+    },
+    {
+      "name": "last-window-close-exit",
+      "status": "pass"
+    },
+    {
+      "name": "native-process-exit",
+      "status": "pass",
+      "exit_code": 0
+    },
+    {
+      "name": "no-session-files-after-exit",
+      "status": "pass"
+    },
+    {
+      "name": "bookmark-persisted-after-exit",
+      "status": "pass"
+    }
+  ],
+  "official_release_qualified": false,
+  "session_created": true,
+  "version": "153.5.0",
+  "chrome_status": {
+    "title": "Licenses — Mozilla Firefox",
+    "location": "chrome://browser/content/browser.xhtml",
+    "tabCount": 1,
+    "hasControls": true,
+    "keyword": false,
+    "sandboxLevel": 6
+  },
+  "privacy_runtime": {
+    "state": "ready",
+    "flags": {
+      "browsing": false,
+      "search": false,
+      "cookies": false,
+      "downloads": false,
+      "forms": false,
+      "cache": false,
+      "sessions": false,
+      "siteStorage": false
+    },
+    "glue": {
+      "started": true,
+      "privacy": {
+        "state": "ready",
+        "flags": {
+          "browsing": false,
+          "search": false,
+          "cookies": false,
+          "downloads": false,
+          "forms": false,
+          "cache": false,
+          "sessions": false,
+          "siteStorage": false
+        },
+        "failedCategories": []
+      },
+      "diagnosticsEnabled": false
+    }
+  },
+  "home_runtime": {
+    "loaded": true,
+    "moduleExecuted": true,
+    "principal": true,
+    "title": "Privacy Browser — New tab"
+  },
+  "internal_screenshot_captured": true,
+  "settings_runtime": {
+    "loaded": true,
+    "moduleExecuted": true,
+    "privacyCheckboxes": 8
+  },
+  "tasks_runtime": {
+    "rows": 5,
+    "selected": true,
+    "protectedClose": true
+  },
+  "privacy_data_runtime": {
+    "unicodeSearchHistory": true,
+    "searchCleared": true,
+    "cookieCleared": true,
+    "bookmarkRetained": true,
+    "bookmarkGuid": "nN-zOXA3vEPv",
+    "diagnosticsDefaultOff": true
+  },
+  "diagnostics_runtime": {
+    "exported": true,
+    "bounded": true,
+    "deleted": true
+  },
+  "smoke_resources": {
+    "parentPid": 7,
+    "childCount": 1,
+    "representativeOfNormalBrowsing": false,
+    "nativeReportedMemoryBytes": 65536,
+    "osParentRssBytes": 311296,
+    "validForMemoryTarget": false,
+    "reason": "Parent/chrome smoke with sandbox-denied content crashes; raw values do not qualify normal-browser memory or CPU targets."
+  },
+  "external_search_attempt": {
+    "finalURI": "chrome://privacybrowser/content/home.html",
+    "crashed": false,
+    "status": "",
+    "dispatched": true
+  },
+  "external_search_matrix": [
+    {
+      "term": "Privacy Browser",
+      "status": "blocked",
+      "attempted": true,
+      "resultsRendered": false
+    },
+    {
+      "term": "Ubuntu Linux",
+      "status": "blocked",
+      "attempted": false,
+      "resultsRendered": false
+    },
+    {
+      "term": "japan no1",
+      "status": "blocked",
+      "attempted": false,
+      "resultsRendered": false
+    },
+    {
+      "term": "あいうえお",
+      "status": "blocked",
+      "attempted": false,
+      "resultsRendered": false
+    },
+    {
+      "term": "日本語テスト",
+      "status": "blocked",
+      "attempted": false,
+      "resultsRendered": false
+    },
+    {
+      "term": "Firefox ESR",
+      "status": "blocked",
+      "attempted": false,
+      "resultsRendered": false
+    }
+  ],
+  "integration_console_messages": [
+    {
+      "message": "1792398486288\taddons.xpi\tWARN\tChecking /tmp/privacybrowser-dev-runtime/distribution/extensions for addons"
+    }
+  ],
+  "profile_after_exit": {
+    "sessionFilesPresent": false,
+    "diagnosticDirectoryPresent": false,
+    "searchHistoryPresent": false
+  },
+  "environment_sandbox_denied": true,
+  "native_content_crash_detected": true,
+  "native_error_summary": [],
+  "unresolved_native_errors": false,
+  "elapsed_seconds": 4.526
+}

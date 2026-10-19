@@ -1,0 +1,10 @@
+dist/
+obj-*/
+__pycache__/
+*.pyc
+profiles/
+*.log
+*.key
+*.p12
+*.pfx
+node_modules/

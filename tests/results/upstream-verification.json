@@ -1,0 +1,11 @@
+{
+  "version": "153.5.0esr",
+  "archive": "firefox-153.5.0esr.tar.xz",
+  "signature_verified": true,
+  "pinned_primary_fingerprint": "14F26682D0916CDD81E37B6D61B7B526D98F0353",
+  "pinned_signing_fingerprint": "827E658608679618CD349F93678E455D76767AA3",
+  "sha512_match": true,
+  "sha512": "322c4c9f1768e1406bac8ae12b407c504727f3747c2d462ee4c7ab1aee4e308caf837c6d516ba72c40b9f3bb3ec07bf22431bfb2f3e3f0abf08a797baeae01c1",
+  "key_source": "https://blog.mozilla.org/security/2026/08/10/updated-gpg-key-for-signing-firefox-and-thunderbird-releases/",
+  "native_source_compiled": false
+}

@@ -1,0 +1,33 @@
+{
+  "package": "privacy-browser-dev-bootstrap_0.1.0~dev1_all.deb",
+  "kind": "external-runtime-developer-bootstrap",
+  "contains_gecko": false,
+  "host": "Ubuntu 24.04 container x86-64",
+  "desktop_menu_clicked": false,
+  "browser_installed_from_package_started": false,
+  "steps": [
+    {
+      "action": "dpkg -i",
+      "exit_code": 0,
+      "ok": true,
+      "output": "Selecting previously unselected package privacy-browser-dev-bootstrap.\n(Reading database ... 70907 files and directories currently installed.)\nPreparing to unpack .../privacy-browser-dev-bootstrap_0.1.0~dev1_all.deb ...\nUnpacking privacy-browser-dev-bootstrap (0.1.0~dev1) ...\nSetting up privacy-browser-dev-bootstrap (0.1.0~dev1) ...\nProcessing triggers for hicolor-icon-theme (0.17-2) ...\n",
+      "stderr": ""
+    },
+    {
+      "action": "/usr/bin/privacy-browser-dev --help",
+      "exit_code": 0,
+      "ok": true,
+      "output": "usage: dev_launcher.py [-h] [--runtime RUNTIME] [--project PROJECT]\n                       [--prepare-only]\n\nRun the experimental chrome with a separately obtained Firefox ESR runtime.\nThe system browser is never modified. A writable private runtime copy is\ncreated under the user's cache, and a separate Privacy Browser profile is\nused.\n\noptions:\n  -h, --help         show this help message and exit\n  --runtime RUNTIME\n  --project PROJECT\n  --prepare-only\n",
+      "stderr": ""
+    },
+    {
+      "action": "dpkg -r",
+      "exit_code": 0,
+      "ok": true,
+      "output": "(Reading database ... 70958 files and directories currently installed.)\nRemoving privacy-browser-dev-bootstrap (0.1.0~dev1) ...\nProcessing triggers for hicolor-icon-theme (0.17-2) ...\n",
+      "stderr": ""
+    }
+  ],
+  "launcher_remaining": false,
+  "package_directory_remaining": false
+}

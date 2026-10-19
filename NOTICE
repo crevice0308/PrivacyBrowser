@@ -1,0 +1,32 @@
+Privacy Browser v0.1.0-dev
+
+Copyright 2026 Privacy Browser contributors.
+Project-added source code and original project artwork are made available under
+the Mozilla Public License, version 2.0, unless a file states another license.
+The complete MPL-2.0 text is provided in LICENSE.
+
+This source archive and the project-only bootstrap DEB do not contain the Gecko
+engine or a Firefox executable. A separately obtained matching ESR runtime is
+required for the experimental local overlay. Firefox and Gecko source and
+bundled third-party components remain subject to their own notices and licenses.
+Do not replace or remove their license records. A source-built distribution must
+provide the corresponding source and all applicable component notices.
+
+The development overlay does not rewrite the supplied executable's native
+Firefox identity, artwork, digital signatures, or vendor metadata. It is a local
+test adapter, not an independently branded Firefox distribution. The independent
+branding preparation path is in tools/prepare_source.py and has not yet produced
+a verified complete product build. Reuse of Mozilla's unofficial branding build
+scaffolding retains its applicable source notices.
+
+Mozilla, Firefox, and related names and marks are trademarks of their respective
+owners. This independent project is not endorsed by Mozilla. No trademark rights
+are granted by this project's source license. Use independently branded source
+builds and review applicable upstream policies before distributing a product:
+https://www.mozilla.org/foundation/trademarks/policy/
+https://www.mozilla.org/foundation/licensing/
+https://www.mozilla.org/MPL/2.0/
+
+Brave Search, DuckDuckGo, Google, and Bing identify user-selectable external search
+services. No endorsement or affiliation is asserted, and no service results or
+third-party search artwork are bundled.

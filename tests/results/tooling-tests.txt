@@ -1,0 +1,16 @@
+test_installs_chrome_without_mutating_upstream_and_disables_wrong_updater (update_tooling_test.DeveloperBuildTests.test_installs_chrome_without_mutating_upstream_and_disables_wrong_updater) ... ok
+test_url_text_cannot_select_the_upstream_browser_profile (update_tooling_test.DeveloperBuildTests.test_url_text_cannot_select_the_upstream_browser_profile) ... ok
+test_windows_developer_launcher_keeps_arguments_out_of_cmd (update_tooling_test.DeveloperBuildTests.test_windows_developer_launcher_keeps_arguments_out_of_cmd) ... ok
+test_disabled_guard_skips_native_io_and_notifies_final_shutdown (update_tooling_test.SessionSourceGuardTests.test_disabled_guard_skips_native_io_and_notifies_final_shutdown) ... ok
+test_unknown_upstream_layout_is_rejected_without_changing_source (update_tooling_test.SessionSourceGuardTests.test_unknown_upstream_layout_is_rejected_without_changing_source) ... ok
+test_developer_artifact_cannot_become_release_by_renaming (update_tooling_test.UpdateTrustTests.test_developer_artifact_cannot_become_release_by_renaming) ... ok
+test_only_official_https_urls_are_accepted (update_tooling_test.UpdateTrustTests.test_only_official_https_urls_are_accepted) ... ok
+test_signature_requires_pinned_primary_and_current_signing_subkey (update_tooling_test.UpdateTrustTests.test_signature_requires_pinned_primary_and_current_signing_subkey) ... ok
+test_signed_checksum_selection_cannot_escape_or_select_ambiguous_entry (update_tooling_test.UpdateTrustTests.test_signed_checksum_selection_cannot_escape_or_select_ambiguous_entry) ... ok
+test_source_extraction_checks_hash_flattens_root_and_rejects_traversal (update_tooling_test.UpdateTrustTests.test_source_extraction_checks_hash_flattens_root_and_rejects_traversal) ... ok
+test_version_input_cannot_inject_archive_paths (update_tooling_test.UpdateTrustTests.test_version_input_cannot_inject_archive_paths) ... ok
+
+----------------------------------------------------------------------
+Ran 11 tests in 0.096s
+
+OK

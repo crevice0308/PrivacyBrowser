@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src chrome:; img-src chrome:; base-uri 'none'; object-src 'none'" />
+  <title>Task Manager — Privacy Browser</title>
+  <link rel="icon" href="chrome://privacybrowser/skin/logo.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="chrome://privacybrowser/skin/page.css" />
+</head>
+<body class="tasks-page">
+  <header class="settings-header"><span class="wordmark"><img src="chrome://privacybrowser/skin/logo.svg" alt="" width="30" height="30" />Privacy Browser</span><span class="muted">Task Manager</span></header>
+  <main class="tasks-main"><p class="eyebrow">A CLOSER LOOK</p><h1 id="task-title">Task Manager</h1><p class="muted">Inspect tabs and shared processes. Closing a tab is the least disruptive way to release its resources.</p>
+    <div class="task-toolbar"><label for="task-sort">Sort by</label><select id="task-sort"><option value="ram">Memory</option><option value="cpu">CPU</option><option value="name">Name</option></select><button id="task-native" class="button secondary" type="button">Advanced processes</button><button id="task-refresh" class="button secondary" type="button">Refresh</button></div>
+    <div class="task-table-wrap"><table class="task-table"><thead><tr><th scope="col">Name</th><th scope="col">Process ID</th><th scope="col">CPU</th><th scope="col">Memory</th><th scope="col">Type</th><th scope="col">State</th></tr></thead><tbody id="task-rows"></tbody></table></div>
+    <div class="section-actions"><button id="task-close" class="button secondary" type="button" disabled="disabled">Close selected tab</button><button id="task-kill" class="button danger" type="button" disabled="disabled">Force close tab…</button></div>
+    <p id="task-status" class="status" role="status" aria-live="polite">Loading process information…</p><p class="explanation">Tabs can share a process. Ending a process can affect every tab listed under it. Browser, GPU, and other critical internal processes are protected.</p>
+  </main>
+</body>
+</html>

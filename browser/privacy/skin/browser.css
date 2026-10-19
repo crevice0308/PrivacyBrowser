@@ -1,0 +1,15 @@
+/* Native tabs, site-identity controls, focus indication and navigation remain intact. */
+:root {
+  --pb-accent: light-dark(#286b58, #91c8b0);
+  --pb-chrome: light-dark(#f5f6f3, #181e1c);
+  --toolbar-bgcolor: var(--pb-chrome);
+  --tab-selected-bgcolor: light-dark(#fff, #2c3530);
+  --toolbarbutton-border-radius: 8px;
+  --tab-border-radius: 9px;
+}
+#TabsToolbar { padding-top: 3px; }
+#nav-bar { padding-block: 4px; border-top: 0 !important; }
+#privacybrowser-search-button { list-style-image: url("chrome://privacybrowser/skin/search.svg"); -moz-context-properties: fill; fill: currentColor; }
+#privacybrowser-menu-button { list-style-image: url("chrome://privacybrowser/skin/logo.svg"); }
+#urlbar-background { border-radius: 9px !important; }
+@media (prefers-reduced-motion: reduce) { #privacybrowser-search-button { transition: none; } }

@@ -1,0 +1,14 @@
+{
+  "version": "0.1.0-dev",
+  "node_unit_pass": 61,
+  "python_tooling_pass": 11,
+  "native_linux_counts": {
+    "pass": 20,
+    "blocked": 1
+  },
+  "native_exception_summary_empty": true,
+  "windows_tested": false,
+  "full_source_compiled": false,
+  "fully_independent_binary_available": false,
+  "release_eligible": false
+}

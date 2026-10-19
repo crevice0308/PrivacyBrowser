@@ -1,0 +1,9 @@
+{
+  "ok": true,
+  "checked": {
+    "python": 11,
+    "javascript": 12,
+    "xml": 4
+  },
+  "errors": []
+}

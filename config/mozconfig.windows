@@ -1,0 +1,20 @@
+# Run from MozillaBuild on a Windows 11 x64 build host.
+mk_add_options MOZ_OBJDIR=@TOPSRCDIR@/obj-privacybrowser
+ac_add_options --enable-application=browser
+ac_add_options --target=x86_64-pc-mingw32
+ac_add_options --with-branding=browser/branding/privacybrowser
+ac_add_options --disable-official-branding
+ac_add_options --with-app-name=privacybrowser
+ac_add_options --with-app-basename=PrivacyBrowser
+export MOZ_APP_REMOTINGNAME=privacybrowser
+export MOZ_STUB_INSTALLER=
+ac_add_options --enable-optimize
+ac_add_options --disable-debug
+ac_add_options --with-redist
+ac_add_options --disable-updater
+ac_add_options --disable-maintenance-service
+ac_add_options --disable-default-browser-agent
+# prepare_source.py gates off Gecko's upstream NSIS installer/helper build.
+# Package the native ZIP with the independently reviewed project installer.
+# Native automatic updates must remain disabled until the project's signed
+# update service, rollback and independent signing infrastructure are deployed.

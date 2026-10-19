@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src chrome:; style-src chrome:; img-src chrome:; base-uri 'none'; object-src 'none'">
+  <title>Settings — Privacy Browser</title>
+  <link rel="icon" href="chrome://privacybrowser/skin/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="chrome://privacybrowser/skin/page.css">
+  <script type="module" src="chrome://privacybrowser/content/settings.mjs"></script>
+</head>
+<body>
+  <header class="settings-header"><a class="wordmark" href="chrome://privacybrowser/content/home.html"><img src="chrome://privacybrowser/skin/logo.svg" alt="" width="30" height="30">Privacy Browser</a><span class="muted">Settings</span></header>
+  <main class="settings-layout">
+    <nav class="settings-nav" aria-label="Settings sections"><a href="#privacy">Privacy</a><a href="#search">Search</a><a href="#performance">Performance</a><a href="#diagnostics">Diagnostics</a><a href="#about">About</a></nav>
+    <div class="settings-content"><div class="page-heading"><p class="eyebrow">MAKE YOURSELF AT HOME</p><h1>Your browser.<br>Your choices.</h1><p>Manage what stays, how you search, and how your browser runs.</p></div>
+    <div id="status" class="settings-status" role="status" aria-live="polite"></div>
+    <section id="privacy" class="settings-section"><div class="section-heading"><h2>Zero History</h2><p>All history categories start off. Bookmarks and downloaded files are kept.</p></div>
+      <div class="settings-card">
+        <label class="setting-row"><span><strong>Browsing history</strong><small>Keep a record of websites you visit.</small></span><input type="checkbox" role="switch" data-pref="history.browsing"></label>
+        <label class="setting-row"><span><strong>Search history</strong><small>Keep search terms entered in the dedicated search box.</small></span><input type="checkbox" role="switch" data-pref="history.search"></label>
+        <label class="setting-row"><span><strong>Persistent cookies</strong><small>Keep website sign-ins and preferences between sessions.</small></span><input type="checkbox" role="switch" data-pref="history.cookies"></label>
+        <label class="setting-row"><span><strong>Download history</strong><small>Keep the download list. Downloaded files are unaffected.</small></span><input type="checkbox" role="switch" data-pref="history.downloads"></label>
+        <label class="setting-row"><span><strong>Form history</strong><small>Remember text entered in website forms.</small></span><input type="checkbox" role="switch" data-pref="history.forms"></label>
+        <label class="setting-row"><span><strong>Disk cache</strong><small>Keep copies of web content on disk.</small></span><input type="checkbox" role="switch" data-pref="history.cache"></label>
+        <label class="setting-row"><span><strong>Session recovery</strong><small>Restore tabs after restarting the browser.</small></span><input type="checkbox" role="switch" data-pref="history.sessions"></label>
+        <label class="setting-row"><span><strong>Site storage</strong><small>Keep website databases, local storage, and service-worker data.</small></span><input type="checkbox" role="switch" data-pref="history.siteStorage"></label>
+      </div>
+      <div class="section-actions"><button id="clear-data" class="button secondary" type="button">Clear existing history…</button><span class="muted">Restart after changing privacy settings.</span></div>
+      <p class="explanation">Zero History controls browser-managed data. Operating system logs, DNS caches, swap, crash dumps, and traces in websites or network services are outside its scope. Data that was already saved stays until you clear it. Downloaded files and bookmarks are preserved.</p>
+      <p class="explanation">Closed-tab recovery follows session recovery settings. Turning a category off can remove that category’s previously saved data during privacy cleanup.</p>
+    </section>
+    <section id="search" class="settings-section"><div class="section-heading"><h2>Search</h2><p>A separate space for questions. The address bar stays for URLs.</p></div><div class="settings-card padded-card">
+      <label class="field-label" for="search-engine">Search engine</label><select id="search-engine"><option value="0">Brave Search</option><option value="1">DuckDuckGo</option><option value="2">Google</option><option value="3">Bing</option><option value="custom">Custom</option></select>
+      <div id="custom-engine-fields" hidden><label class="field-label" for="custom-engine-name">Engine name</label><input id="custom-engine-name" type="text" maxlength="80" autocomplete="off"><label class="field-label" for="custom-engine-url">HTTPS search URL</label><input id="custom-engine-url" type="url" placeholder="https://example.com/search?q={searchTerms}" autocomplete="off" spellcheck="false"><p class="explanation">Include <code>{searchTerms}</code> exactly once where the query belongs.</p><button id="save-search-engine" class="button secondary" type="button">Save search engine</button></div>
+      <div class="keyboard-guide"><span>Focus address bar <kbd>Ctrl L</kbd></span><span>Open search <kbd>Ctrl K</kbd></span></div>
+      <button id="native-search-settings" class="text-button" type="button">Firefox-compatible search and extension settings ↗</button>
+    </div></section>
+    <section id="performance" class="settings-section"><div class="section-heading"><h2>Performance &amp; shutdown</h2><p>Keep background work light, and close the browser when you’re done.</p></div><div class="settings-card">
+      <label class="setting-row"><span><strong>Complete quit</strong><small>Quit when the final browser window closes. Active downloads ask before quitting.</small></span><input type="checkbox" role="switch" data-pref="completeQuit" data-default="true"></label>
+      <label class="setting-row"><span><strong>Suspend inactive tabs</strong><small>Release eligible background tabs. Active, playing, pinned, and busy tabs are protected.</small></span><input type="checkbox" role="switch" data-pref="tabs.suspend.enabled" data-default="true"></label>
+      <label class="setting-row"><span><strong>Suspension delay</strong><small>Minutes of inactivity before a tab becomes eligible.</small></span><input id="suspend-minutes" type="number" min="1" max="1440" value="15" aria-label="Suspension delay in minutes"></label>
+    </div><p class="explanation">Firefox’s sandbox, site isolation, certificate checks, and download protection remain enabled. Manage site permissions in the page’s address-bar permission controls or Firefox-compatible settings.</p><button id="native-permission-settings" class="text-button" type="button">Site permissions &amp; security settings ↗</button></section>
+    <section id="diagnostics" class="settings-section"><div class="section-heading"><h2>Diagnostics</h2><p>Optional local logs to help investigate a problem.</p></div><div class="settings-card">
+      <label class="setting-row"><span><strong>Record diagnostics</strong><small>Off by default. Diagnostic packages are exported only when you ask.</small></span><input type="checkbox" role="switch" data-pref="diagnostics.enabled"></label>
+      <label class="setting-row"><span><strong>Log detail</strong><small>Choose which diagnostic event levels are retained.</small></span><select id="diagnostic-level"><option value="error">Errors</option><option value="warn">Warnings &amp; errors</option><option value="debug">Debug, warnings &amp; errors</option></select></label>
+      <label class="setting-row"><span><strong>Size per log file</strong><small>Older log files rotate at the configured limit.</small></span><select id="diagnostic-size"><option value="262144">256 KiB</option><option value="1048576">1 MiB</option><option value="5242880">5 MiB</option><option value="10485760">10 MiB</option></select></label>
+      <label class="setting-row"><span><strong>Number of log files</strong><small>Includes the current log file.</small></span><input id="diagnostic-files" type="number" min="1" max="20" value="3" aria-label="Maximum number of log files"></label>
+      <div class="setting-row"><span><strong>Save location</strong><small id="diagnostic-directory">Browser profile diagnostics folder</small></span><button id="choose-diagnostic-directory" class="button secondary" type="button">Choose folder…</button></div>
+    </div><div class="section-actions"><button id="export-diagnostics" class="button" type="button">Export diagnostic ZIP…</button><button id="delete-diagnostics" class="button secondary" type="button">Delete logs…</button></div><p class="explanation">Diagnostic events use a restricted schema. URLs, searches, cookies, passwords, and form values are excluded. Packages are saved locally for you to inspect and share.</p></section>
+    <section id="about" class="settings-section"><div class="section-heading"><h2>Privacy Browser</h2><p>Version 0.1.0 · Development build</p></div><div class="settings-card padded-card"><p>Built on Firefox ESR for Windows and Linux. A minimal browser experience for SecureLite OS.</p><p>Open-source software under applicable Mozilla and project licenses.</p><p class="explanation">Development status, verified capabilities, and test limitations are recorded in the included release report. Performance targets require measurement on the intended hardware.</p><button id="native-about" class="text-button" type="button">Engine and troubleshooting information ↗</button></div></section>
+    </div>
+  </main>
+</body>
+</html>
