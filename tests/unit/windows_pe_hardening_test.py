@@ -17,7 +17,7 @@ class PEHardeningTests(unittest.TestCase):
     def test_reviewed_source_and_binary_pin_are_unchanged(self):
         # setUp replaces the executable digest with inert fixture bytes; inspect
         # the checked-in constant without running or downloading the real tool.
-        source = (ROOT / "tools/windows_pe_hardening.py").read_text()
+        source = (ROOT / "tools/windows_pe_hardening.py").read_text(encoding="utf-8")
         self.assertIn('TOOL_SHA256 = "145eec7603b55008b59c4fbcaf2fb1be23e481d28828a67d3dddb6842e8fc10b"', source)
         self.assertEqual(hardening.TOOL_SOURCE_REVISION, "93ffe67dbfc757bf6f440d80b8acf88e652ed60a")
         self.assertEqual(set(hardening.CHECKS), {"aslr", "cfg", "dynamicBase", "gs", "isolation", "nx", "seh", "highEntropyVA"})
@@ -106,7 +106,7 @@ class PEHardeningTests(unittest.TestCase):
                 with mock.patch.object(hardening.subprocess, "run", side_effect=fail), self.assertRaises(ValueError):
                     hardening.collect(self.work)
                 self.assertFalse((self.evidence / "windows-pe-hardening.json").exists())
-                command = json.loads((self.evidence / "pe-hardening-privacybrowser.exe-command.json").read_text())
+                command = json.loads((self.evidence / "pe-hardening-privacybrowser.exe-command.json").read_text(encoding="utf-8"))
                 self.assertEqual(command["timed_out"], mode == "timeout")
                 for path in self.evidence.iterdir():
                     path.unlink()
@@ -132,13 +132,13 @@ class PEHardeningTests(unittest.TestCase):
             hardening.validate_retained(self.evidence, self.runtime)
         path.write_bytes(original)
         raw = self.evidence / "pe-hardening-xul.dll.json"
-        raw.write_text(json.dumps(dict(self.output("xul.dll"), cfg=False)))
+        raw.write_text(json.dumps(dict(self.output("xul.dll"), cfg=False)), encoding="utf-8")
         with self.assertRaises(ValueError):
             hardening.validate_retained(self.evidence, self.runtime)
         report_path = self.evidence / "windows-pe-hardening.json"
-        report = json.loads(report_path.read_text())
+        report = json.loads(report_path.read_text(encoding="utf-8"))
         report["binaries"]["xul.dll"]["stdout"]["sha256"] = hardening.native.digest(raw)
-        report_path.write_text(json.dumps(report))
+        report_path.write_text(json.dumps(report), encoding="utf-8")
         with self.assertRaises(ValueError):
             hardening.validate_retained(self.evidence, self.runtime)
 
@@ -146,7 +146,7 @@ class PEHardeningTests(unittest.TestCase):
         with self.assertRaises(OSError):
             hardening.validate_retained(self.evidence, self.runtime)
         for filename in ("windows_native_evidence.py", "windows_prerelease.py"):
-            self.assertIn("windows_pe_hardening.validate_retained(", (ROOT / "tools" / filename).read_text())
+            self.assertIn("windows_pe_hardening.validate_retained(", (ROOT / "tools" / filename).read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
