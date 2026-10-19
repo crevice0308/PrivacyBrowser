@@ -26,6 +26,7 @@ run_logged() {
     shift
     local -a statuses
     printf 'PrivacyBrowser phase started: %s\n' "$phase"
+    printf '::notice title=PrivacyBrowser phase::Started %s\n' "$phase"
     set +e
     "$@" 2>&1 | tee "$evidence/$phase.log"
     statuses=("${PIPESTATUS[@]}")
@@ -33,6 +34,8 @@ run_logged() {
     printf '{"schema_version":1,"phase":"%s","command_exit_code":%s,"tee_exit_code":%s}\n' \
         "$phase" "${statuses[0]}" "${statuses[1]}" > "$evidence/$phase-exit.json"
     printf 'PrivacyBrowser phase ended: %s; command=%s; tee=%s\n' \
+        "$phase" "${statuses[0]}" "${statuses[1]}"
+    printf '::notice title=PrivacyBrowser phase::Ended %s; command=%s; tee=%s\n' \
         "$phase" "${statuses[0]}" "${statuses[1]}"
     if (( statuses[0] != 0 )); then return "${statuses[0]}"; fi
     return "${statuses[1]}"

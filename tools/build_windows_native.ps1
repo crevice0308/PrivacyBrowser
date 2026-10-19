@@ -40,6 +40,31 @@ foreach ($Name in @('downloads', 'evidence', 'tmp', 'mozbuild', 'pip-cache', 'ca
     New-Item -ItemType Directory -Path (Join-Path $Work $Name) | Out-Null
 }
 $Evidence = Join-Path $Work 'evidence'
+function Write-MemorySnapshot([string] $Phase) {
+    # Read only bounded resource totals, not account, process, or machine names.
+    # A diagnostic failure must not replace the build's actual outcome.
+    $Snapshot = [ordered]@{
+        schema_version = 1; phase = $Phase; collected = $false
+        observation = 'instantaneous, not peak usage'
+        observed_utc = [DateTime]::UtcNow.ToString('o')
+    }
+    try {
+        $Memory = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
+        $Snapshot.total_physical_kib = [uint64]$Memory.TotalVisibleMemorySize
+        $Snapshot.free_physical_kib = [uint64]$Memory.FreePhysicalMemory
+        $Snapshot.total_virtual_kib = [uint64]$Memory.TotalVirtualMemorySize
+        $Snapshot.free_virtual_kib = [uint64]$Memory.FreeVirtualMemory
+        $Snapshot.collected = $true
+    } catch {
+        $Snapshot.error_type = $_.Exception.GetType().FullName
+    }
+    try {
+        $Snapshot | ConvertTo-Json | Set-Content (Join-Path $Evidence "memory-$Phase.json") -Encoding utf8NoBOM
+    } catch {
+        Write-Warning ('Memory diagnostic could not be saved: ' + $_.Exception.GetType().FullName)
+    }
+}
+Write-MemorySnapshot 'initial'
 $env:TEMP = Join-Path $Work 'tmp'
 $env:TMP = $env:TEMP
 $env:PIP_CACHE_DIR = Join-Path $Work 'pip-cache'
@@ -200,7 +225,14 @@ if ($MozconfigText -match '--enable-artifact-builds|--disable-sandbox|--disable-
 if ($MozconfigText -notmatch '(?m)^ac_add_options --enable-bootstrap\s*$') {
     "`nac_add_options --enable-bootstrap" | Add-Content $Mozconfig
 }
-"`nmk_add_options MOZ_MAKE_FLAGS=-j4`nmk_add_options MOZ_AUTOMATION_PACKAGE=0" | Add-Content $Mozconfig
+# Reduce simultaneous C++/Rust memory pressure without changing compiler,
+# runtime security, LTO, or any packaging/acceptance gate.
+"`nmk_add_options MOZ_MAKE_FLAGS=-j2`nmk_add_options MOZ_AUTOMATION_PACKAGE=0" | Add-Content $Mozconfig
+[ordered]@{
+    schema_version = 1; make_jobs = 2; debug_symbols = $false
+    release_mode_preserved = $true; lto_policy_changed = $false
+    runtime_security_changed = $false; pagefile_settings_changed = $false
+} | ConvertTo-Json | Set-Content (Join-Path $Evidence 'build-resource-policy.json') -Encoding utf8NoBOM
 
 $env:PB_WORK_UNIX = '/d/pb'
 $RepoUnix = '/' + $Repo.Substring(0, 1).ToLowerInvariant() + $Repo.Substring(2).Replace('\', '/')
@@ -213,10 +245,12 @@ $Launch = Join-Path $Work 'run-mozilla-build.cmd'
 call "$MozillaBuild\start-shell.bat" -c "bash '$RepoUnix/tools/build_windows_native.sh'"
 exit /b %ERRORLEVEL%
 "@ | Set-Content $Launch -Encoding ascii
+Write-MemorySnapshot 'before-shell'
 & cmd.exe /d /c $Launch
 $ShellExitCode = $LASTEXITCODE
 [ordered]@{ schema_version = 1; phase = 'mozilla-build-shell'; exit_code = $ShellExitCode } |
     ConvertTo-Json | Set-Content (Join-Path $Evidence 'mozilla-build-shell-exit.json') -Encoding utf8
+Write-MemorySnapshot 'after-shell'
 if ($ShellExitCode -ne 0) { throw "MozillaBuild shell failed with exit code $ShellExitCode; inspect phase exit records and logs." }
 
 # First unpack mach's new ZIP and perform static checks only. Browser startup
@@ -224,6 +258,9 @@ if ($ShellExitCode -ne 0) { throw "MozillaBuild shell failed with exit code $She
 # its --smoke callback then runs before uninstall verification. No Mozilla
 # release package is used.
 Invoke-Python @((Join-Path $Repo 'tools\windows_native_evidence.py'), '--work-root', $Work)
+# Statically inspect the actual packaged EXE and xul.dll even when symbol
+# generation is disabled. Neither candidate binary is executed by this check.
+Invoke-Python @((Join-Path $Repo 'tools\windows_pe_hardening.py'))
 # Recheck the exact compiler immediately before the real, validated packaging.
 Assert-Hash $NativeCompiler $Nsis.compiler_sha256
 $Runtime = Join-Path $Work 'candidate\PrivacyBrowser'

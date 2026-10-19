@@ -24,6 +24,7 @@ import zipfile
 
 import verify_windows_native as native
 import windows_native_evidence as evidence
+import windows_pe_hardening
 
 ROOT = Path(__file__).resolve().parents[1]
 REPO = "crevice0308/PrivacyBrowser"
@@ -261,6 +262,7 @@ def validate_payload(root, request):
     require(sorted(path.name for path in unpacked.iterdir()) == ["PrivacyBrowser"], "Unexpected runtime ZIP layout")
     runtime = unpacked / "PrivacyBrowser"
     report = native.validate_candidate(runtime, root / "evidence/build-evidence.json")
+    windows_pe_hardening.validate_retained(root / "evidence", runtime)
     binary_hash = report["native_binary_sha256"]
     for name in ("LICENSE", "NOTICE"):
         require(native.regular_file(runtime, name).read_bytes() == (ROOT / name).read_bytes(), "Project legal notice mismatch")

@@ -18,6 +18,7 @@ import re
 import shutil
 import stat
 import subprocess
+import windows_pe_hardening
 from urllib.parse import urlsplit
 import urllib.request
 import zipfile
@@ -259,6 +260,7 @@ def smoke_candidate(work: Path) -> None:
     build_evidence = evidence / "build-evidence.json"
     proof = native.load_json(build_evidence)
     native.validate_candidate(runtime, build_evidence)
+    windows_pe_hardening.validate_retained(evidence, runtime)
     static = native.load_json(evidence / "native-static-checks.json")
     native.require(static.get("static_candidate_checks_passed") is True
                    and static.get("native_binary_sha256") == proof["files"]["privacybrowser.exe"],
@@ -320,6 +322,7 @@ def stage(work: Path) -> None:
     runtime = work / "candidate/PrivacyBrowser"
     proof = evidence / "build-evidence.json"
     native.validate_candidate(runtime, proof)
+    windows_pe_hardening.validate_retained(evidence, runtime)
     smoke = native.load_json(evidence / "windows-runtime-smoke.json")
     native.require(smoke.get("windows_smoke_checks_passed") is True and
                    smoke.get("native_binary_sha256") == native.digest(runtime / "privacybrowser.exe"), "Missing matching passed Windows smoke tests")

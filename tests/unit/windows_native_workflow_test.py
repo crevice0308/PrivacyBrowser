@@ -3,6 +3,7 @@ from pathlib import Path
 import io
 import inspect
 import json
+import re
 import stat
 import sys
 import tempfile
@@ -176,6 +177,49 @@ class NativeWorkflowTests(unittest.TestCase):
         self.assertNotIn("Set-MpPreference", source)
         self.assertNotIn("Add-MpPreference", source)
 
+    def test_hosted_memory_policy_preserves_release_security_and_tests(self):
+        config = (ROOT / "config/mozconfig.windows").read_text()
+        powershell = (ROOT / "tools/build_windows_native.ps1").read_text()
+        shell = (ROOT / "tools/build_windows_native.sh").read_text()
+        self.assertEqual(re.findall(r"MOZ_MAKE_FLAGS=([^`\s]+)", powershell), ["-j2"])
+        for option in ("--disable-debug-symbols", "--enable-optimize", "--disable-debug",
+                       "--enable-warnings-as-errors"):
+            self.assertIn("ac_add_options " + option + "\n", config)
+        for forbidden in ("--disable-release", "--disable-hardening", "--disable-tests",
+                          "--disable-sandbox", "--disable-lto", "RUSTFLAGS=", "CARGO_RUSTCFLAGS="):
+            self.assertNotIn(forbidden, config + shell)
+        self.assertIn('run_logged winchecksec-hash sha256sum', shell)
+        self.assertIn('run_logged xpcshell ./mach xpcshell-test', shell)
+        self.assertIn("make_jobs = 2; debug_symbols = $false", powershell)
+        self.assertIn("pagefile_settings_changed = $false", powershell)
+        self.assertIn("'build-resource-policy.json'", powershell)
+
+    def test_memory_evidence_is_bounded_read_only_and_not_peak_measurement(self):
+        powershell = (ROOT / "tools/build_windows_native.ps1").read_text()
+        start = powershell.index("function Write-MemorySnapshot(")
+        end = powershell.index("Write-MemorySnapshot 'initial'", start)
+        snapshot = powershell[start:end]
+        self.assertIn("Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop", snapshot)
+        for field in ("total_physical_kib", "free_physical_kib", "total_virtual_kib", "free_virtual_kib"):
+            self.assertIn("$Snapshot." + field, snapshot)
+        self.assertIn("instantaneous, not peak usage", snapshot)
+        self.assertIn("$Snapshot.error_type = $_.Exception.GetType().FullName", snapshot)
+        for forbidden in ("Set-CimInstance", "Invoke-CimMethod", "Set-ItemProperty", "Win32_PageFileSetting"):
+            self.assertNotIn(forbidden, powershell)
+        launch = powershell.index("& cmd.exe /d /c $Launch")
+        capture = powershell.index("$ShellExitCode = $LASTEXITCODE", launch)
+        after = powershell.index("Write-MemorySnapshot 'after-shell'", capture)
+        self.assertLess(launch, capture)
+        self.assertLess(capture, after)
+
+    def test_phase_notices_preserve_original_exit_codes(self):
+        shell = (ROOT / "tools/build_windows_native.sh").read_text()
+        self.assertIn("::notice title=PrivacyBrowser phase::Started %s", shell)
+        self.assertIn("::notice title=PrivacyBrowser phase::Ended %s; command=%s; tee=%s", shell)
+        self.assertIn('statuses=("${PIPESTATUS[@]}")', shell)
+        self.assertIn('if (( statuses[0] != 0 )); then return "${statuses[0]}"; fi', shell)
+        self.assertIn('return "${statuses[1]}"', shell)
+
     def test_shell_launch_exit_is_recorded_before_failure(self):
         source = (ROOT / "tools/build_windows_native.ps1").read_text()
         launch = source.index("& cmd.exe /d /c $Launch")
@@ -330,10 +374,12 @@ class NativeWorkflowTests(unittest.TestCase):
     def test_build_orchestration_defers_smoke_to_installer_test(self):
         source = (ROOT / "tools/build_windows_native.ps1").read_text()
         preparation = source.index("'tools\\windows_native_evidence.py'), '--work-root', $Work)")
+        hardening = source.index("'tools\\windows_pe_hardening.py')")
         package = source.index("'tools\\package_windows_native.py')")
         installation = source.index("'tools\\test_native_installer.ps1')")
         stage = source.index("'--stage')")
-        self.assertLess(preparation, package)
+        self.assertLess(preparation, hardening)
+        self.assertLess(hardening, package)
         self.assertLess(package, installation)
         self.assertLess(installation, stage)
         self.assertNotIn("'--smoke'", source)

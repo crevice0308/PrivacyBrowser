@@ -356,6 +356,24 @@ class PublicationTests(unittest.TestCase):
                 archive.writestr("PrivacyBrowser/" + name, (self.repo / name).read_bytes())
             archive.writestr("PrivacyBrowser/NSIS-COPYING.txt", b"inert complete notice")
             archive.writestr("PrivacyBrowser/privacybrowser.exe", b"inert candidate executable")
+            archive.writestr("PrivacyBrowser/xul.dll", b"inert candidate DLL")
+        hardening = publisher.windows_pe_hardening
+        hardening_records = {}
+        for name, data in (("privacybrowser.exe", b"inert candidate executable"), ("xul.dll", b"inert candidate DLL")):
+            raw = retained / ("pe-hardening-" + name + ".json")
+            error = retained / ("pe-hardening-" + name + ".stderr.log")
+            command = retained / ("pe-hardening-" + name + "-command.json")
+            json_file(raw, {"path": "D:/pb/candidate/PrivacyBrowser/" + name,
+                            **{key: True for key in hardening.CHECKS}})
+            error.write_bytes(b"")
+            json_file(command, {"exit_code": 0, "timed_out": False,
+                                "tool_sha256": hardening.TOOL_SHA256, "binary_sha256": hashed(data)})
+            hardening_records[name] = {"sha256": hashed(data), **{
+                role: {"path": path.name, "sha256": publisher.native.digest(path)}
+                for role, path in (("stdout", raw), ("stderr", error), ("command", command))}}
+        json_file(retained / "windows-pe-hardening.json", {"schema_version": 1, "passed": True,
+            "candidate_executed": False, "tool_sha256": hardening.TOOL_SHA256,
+            "tool_source_revision": hardening.TOOL_SOURCE_REVISION, "binaries": hardening_records})
         (root / publisher.SETUP).write_bytes(b"inert setup")
         (root / (publisher.SETUP + ".build.log")).write_text("inert NSIS log")
         (retained / "xpcshell.log").write_bytes(b"inert xpcshell success assertion")
