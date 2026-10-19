@@ -16,6 +16,14 @@ import windows_native_evidence as workflow
 
 
 class NativeWorkflowTests(unittest.TestCase):
+    def test_quality_pip_command_uses_yaml_block_scalar(self):
+        # A plain YAML scalar cannot contain the colon-space in :all: followed
+        # by another option. Keep the hash-pinned command in a literal block.
+        quality = (ROOT / ".github/workflows/quality.yml").read_text(encoding="utf-8")
+        self.assertIn("run: |\n          python -m pip install --disable-pip-version-check "
+                      "--only-binary=:all: --require-hashes -r requirements-build.txt", quality)
+        self.assertNotIn("run: python -m pip install", quality)
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
