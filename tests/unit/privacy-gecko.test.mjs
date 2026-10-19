@@ -15,6 +15,7 @@ const cleared = [];
 let clearedPlacesHistory = 0;
 const formChanges = [];
 const prefObservers = [];
+const permissionCalls = [];
 function setPref(key, value) {
   const previous = prefs.get(key);
   prefs.set(key, value);
@@ -45,7 +46,7 @@ globalThis.IOUtils = {
   remove: async (target, options = {}) => fs.rm(target, { force: options.ignoreAbsent === true, recursive: options.recursive === true }).catch(notFound),
   readJSON: async target => JSON.parse(await fs.readFile(target, "utf8").catch(notFound)),
   writeJSON: async (target, value, options) => { await fs.writeFile(options.tmpPath, JSON.stringify(value)); await fs.rename(options.tmpPath, target); },
-  setPermissions: fs.chmod,
+  setPermissions: async (target, mode) => { permissionCalls.push({ target, mode }); await fs.chmod(target, mode); },
   makeDirectory: async (target, options) => fs.mkdir(target, { recursive: options.ignoreExisting, mode: options.permissions }),
   stat: async target => fs.stat(target).catch(notFound),
   writeUTF8: (target, contents, options) => fs.writeFile(target, contents, { flag: options.mode === "append" ? "a" : "w" }),
@@ -84,9 +85,12 @@ test("session cleanup removes only known session files, preserving bookmark and 
 
 test("separate search history survives form cleanup and uses private permissions", async () => {
   const adapter = new GeckoPrivacyAdapter();
+  const permissionStart = permissionCalls.length;
   await adapter.writeSearchHistory(["あいうえお", "日本語テスト"]);
   const target = path.join(profile, "privacybrowser-search-history.json");
-  assert.equal((await fs.stat(target)).mode & 0o777, 0o600);
+  assert.deepEqual(permissionCalls.slice(permissionStart), [{ target, mode: 0o600 }]);
+  // Node's Windows chmod/stat do not model POSIX mode bits or verify Windows ACLs.
+  if (process.platform !== "win32") assert.equal((await fs.stat(target)).mode & 0o777, 0o600);
   await adapter.clearCategory("forms");
   assert.deepEqual(await adapter.readSearchHistory(), ["あいうえお", "日本語テスト"]);
   assert.deepEqual(formChanges.at(-1), { op: "remove" });
@@ -101,13 +105,16 @@ test("filesystem diagnostics rotation retains bounded files and preserves neighb
   const logger = new DiagnosticsLogger({ sink, enabled: true, level: "debug", maxBytes: 1024, maxFiles: 3 });
   await fs.mkdir(directory);
   await fs.writeFile(path.join(directory, "do-not-delete.txt"), "retained");
-  for (let i = 0; i < 100; i++) await logger.log("resource-sample", { pid: i, residentBytes: 1024 * 1024 }, "debug");
+  const permissionStart = permissionCalls.length;
+  for (let i = 0; i < 100; i++) assert.equal(await logger.log("resource-sample", { pid: i, residentBytes: 1024 * 1024 }, "debug"), true);
+  // Each append requests private permissions; rotation renames that same file.
+  assert.deepEqual(permissionCalls.slice(permissionStart), Array.from({ length: 100 }, () => ({ target: sink.path(), mode: 0o600 })));
   const names = await fs.readdir(directory);
   assert.deepEqual(names.sort(), ["diagnostics.1.jsonl", "diagnostics.2.jsonl", "diagnostics.jsonl", "do-not-delete.txt"].sort());
   for (const name of names.filter(name => name.endsWith(".jsonl"))) {
     const stat = await fs.stat(path.join(directory, name));
     assert.ok(stat.size <= 1024);
-    assert.equal(stat.mode & 0o777, 0o600);
+    if (process.platform !== "win32") assert.equal(stat.mode & 0o777, 0o600);
   }
   await logger.deleteLogs();
   assert.deepEqual(await fs.readdir(directory), ["do-not-delete.txt"]);
