@@ -544,8 +544,8 @@ class NativeInstallerTemplateTests(unittest.TestCase):
 
     def test_owned_roots_are_shell_derived_disjoint_and_bound_to_installation(self):
         initialize = self.function("${PREFIX}InitializeDataPaths")
-        self.assertIn('GetFullPathName $LocalDataRoot "$LOCALAPPDATA\\PrivacyBrowser"', initialize)
-        self.assertIn('GetFullPathName $RoamingDataRoot "$APPDATA\\PrivacyBrowser"', initialize)
+        self.assertRegex(initialize, r'Push "\$LOCALAPPDATA\\PrivacyBrowser"\s+Call \$\{PREFIX\}CanonicalizePath\s+Pop \$LocalDataRoot')
+        self.assertRegex(initialize, r'Push "\$APPDATA\\PrivacyBrowser"\s+Call \$\{PREFIX\}CanonicalizePath\s+Pop \$RoamingDataRoot')
         for first, second in (("INSTDIR", "LocalDataRoot"), ("INSTDIR", "RoamingDataRoot"),
                               ("LocalDataRoot", "RoamingDataRoot")):
             self.assertRegex(initialize, rf"StrCpy \$0 \${first}\s+StrCpy \$1 \${second}\s+Call \$\{{PREFIX\}}RejectOverlap")
@@ -562,6 +562,43 @@ class NativeInstallerTemplateTests(unittest.TestCase):
         self.assertIn("StrCmpS $0 $INSTDIR 0 registration_invalid", registration)
         self.assertIn('uninstall.exe', registration)
         self.assertIn("Call un.VerifyRegistration", self.function("un.onInit"))
+
+    def test_canonicalization_accepts_fresh_paths_without_creating_or_opening_them(self):
+        canonicalize = self.function("${PREFIX}CanonicalizePath")
+        self.assertIn("GetFullPathNameW(w r0, i ${NSIS_MAX_STRLEN}, w .r1, p 0) i.r2 ?e", canonicalize)
+        self.assertIn("Pop $NativeError", canonicalize)
+        self.assertRegex(canonicalize, r'\$\{If\} \$0 == ""\s+StrCpy \$NativeError 87\s+Call \$\{PREFIX\}DataRefusal')
+        self.assertRegex(canonicalize, r'\$\{If\} \$2 == 0\s+Call \$\{PREFIX\}DataRefusal')
+        self.assertRegex(canonicalize, r'\$\{If\} \$2 >= \$\{NSIS_MAX_STRLEN\}\s+StrCpy \$NativeError 122\s+Call \$\{PREFIX\}DataRefusal')
+        self.assertIn("StrCpy $0 $1", canonicalize)
+        self.assertNotRegex(canonicalize, r"(?i)CreateDirectory|GetFileAttributes|IfFileExists|CreateFile|FileOpen|Delete|RMDir")
+        initialize = self.function("${PREFIX}InitializeDataPaths")
+        self.assertNotRegex(self.commands, r"(?m)^\s*GetFullPathName\s")
+        self.assertRegex(initialize, r'Push "\$INSTDIR"\s+Call \$\{PREFIX\}CanonicalizePath\s+Pop \$INSTDIR')
+        self.assertEqual(initialize.count("Call ${PREFIX}CanonicalizePath"), 5)
+        self.assertLess(initialize.rindex("Call ${PREFIX}CanonicalizePath"), initialize.index("Call ${PREFIX}LockDirectoryChain"))
+
+    def test_canonicalization_expands_existing_aliases_without_permissive_fallback(self):
+        canonicalize = self.function("${PREFIX}CanonicalizePath")
+        self.assertIn("GetLongPathNameW(w r0, w .r1, i ${NSIS_MAX_STRLEN}) i.r2 ?e", canonicalize)
+        self.assertRegex(canonicalize, r'\$\{If\} \$NativeError != 2\s+\$\{AndIf\} \$NativeError != 3\s+Call \$\{PREFIX\}DataRefusal')
+        self.assertRegex(canonicalize, r'\$\{If\} \$0 == \$5\s+\$\{OrIf\} \$0 == "\$5\\"\s+\$\{OrIf\} \$4 == ""\s+Call \$\{PREFIX\}DataRefusal')
+        self.assertRegex(canonicalize, r'StrLen \$6 \$4\s+StrLen \$5 \$0\s+\$\{If\} \$6 >= \$5\s+Call \$\{PREFIX\}DataRefusal')
+        self.assertIn('${GetFileName} "$0" $5', canonicalize)
+        self.assertRegex(canonicalize, r'StrCpy \$3 "\\\$5\$3"\s+StrCpy \$0 \$4\s+Goto canonical_existing_ancestor')
+        self.assertRegex(canonicalize, r'StrLen \$4 \$1\s+StrLen \$5 \$3\s+IntOp \$4 \$4 \+ \$5\s+\$\{If\} \$4 >= \$\{NSIS_MAX_STRLEN\}\s+StrCpy \$NativeError 122\s+Call \$\{PREFIX\}DataRefusal')
+        self.assertIn('StrCpy $0 "$1$3"', canonicalize)
+        self.assertEqual(re.findall(r"(?m)^\s*Push (\$\d)$", canonicalize), [f"${index}" for index in range(1, 7)])
+        self.assertEqual(re.findall(r"(?m)^\s*Pop (\$\d)$", canonicalize), [f"${index}" for index in reversed(range(1, 7))])
+
+    def test_canonicalization_refuses_ambiguous_components_before_normalizing(self):
+        canonicalize = self.function("${PREFIX}CanonicalizePath")
+        scanning = canonicalize.split("canonical_components_done:", 1)[0]
+        for condition in ('${If} $3 == "\\"', '${OrIf} $3 == "/"', '${OrIf} $3 == ""',
+                          '${If} $2 == "."', '${OrIf} $2 == " "'):
+            self.assertIn(condition, scanning)
+        self.assertLess(canonicalize.index("canonical_components_done:"), canonicalize.index("GetFullPathNameW"))
+        self.assertRegex(canonicalize, r'\$\{If\} \$5 == "\\"\s+\$\{AndIf\} \$1 != \$4\s+\$\{AndIf\} \$1 != "\$4\\"\s+StrCpy \$1 \$1 -1')
 
     def test_owned_marker_is_atomic_unicode_and_exactly_path_bound(self):
         self.assertIn('!define DATA_MARKER "PrivacyBrowser.userdata-owner"', self.commands)
@@ -873,8 +910,8 @@ class NativeInstallerTemplateTests(unittest.TestCase):
             self.assertRegex(fixture, rf"Call {re.escape(prefix)}RequireSyntheticEnvironment\s+Call {re.escape(prefix)}NativeSafetyFixtureMain\s+Quit")
         roots = self.function("${PREFIX}InitializeDataPaths").split("!ifdef PB_SYNTHETIC_FIXTURE", 1)[1].split("!else", 1)[0]
         self.assertRegex(roots, r'StrCmpS \$INSTDIR "\$\{PB_SYNTHETIC_ROOT\}\\app" \+2\s+Call \$\{PREFIX\}DataRefusal')
-        self.assertIn('GetFullPathName $LocalDataRoot "${PB_SYNTHETIC_ROOT}\\local\\PrivacyBrowser"', roots)
-        self.assertIn('GetFullPathName $RoamingDataRoot "${PB_SYNTHETIC_ROOT}\\roaming\\PrivacyBrowser"', roots)
+        self.assertRegex(roots, r'Push "\$\{PB_SYNTHETIC_ROOT\}\\local\\PrivacyBrowser"\s+Call \$\{PREFIX\}CanonicalizePath\s+Pop \$LocalDataRoot')
+        self.assertRegex(roots, r'Push "\$\{PB_SYNTHETIC_ROOT\}\\roaming\\PrivacyBrowser"\s+Call \$\{PREFIX\}CanonicalizePath\s+Pop \$RoamingDataRoot')
 
     def test_synthetic_fixture_compiles_out_production_install_uninstall_and_launch(self):
         launch = re.search(r"(?ms)^!ifndef PB_SYNTHETIC_FIXTURE\nFunction LaunchPrivacyBrowser\n(.*?)^!else\nSection \"Synthetic safety fixture\"\nSectionEnd\n!endif", self.commands)

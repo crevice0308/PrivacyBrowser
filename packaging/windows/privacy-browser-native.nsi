@@ -227,6 +227,131 @@ Function ${PREFIX}OpenNoReparse
   Exch $0
 FunctionEnd
 
+; NSIS 3.07's GetFullPathName instruction additionally requires the final
+; component to exist. Fresh app/data roots must remain absent until ownership
+; checks finish. Normalize lexically, expand the longest existing ancestor's
+; short-name aliases, then append only its still-missing suffix. These name
+; queries do not replace the later all-components no-reparse handle checks.
+Function ${PREFIX}CanonicalizePath
+  Exch $0
+  Push $1
+  Push $2
+  Push $3
+  Push $4
+  Push $5
+  Push $6
+  ${If} $0 == ""
+    StrCpy $NativeError 87
+    Call ${PREFIX}DataRefusal
+  ${EndIf}
+  ; Reject ambiguous components before Win32 can trim their dots/spaces.
+  StrCpy $1 0
+  StrCpy $2 ""
+  canonical_component:
+    StrCpy $3 $0 1 $1
+    ${If} $3 == "\"
+    ${OrIf} $3 == "/"
+    ${OrIf} $3 == ""
+      ${If} $2 == "."
+      ${OrIf} $2 == " "
+        StrCpy $NativeError 123
+        Call ${PREFIX}DataRefusal
+      ${EndIf}
+      ${If} $3 == ""
+        Goto canonical_components_done
+      ${EndIf}
+    ${EndIf}
+    StrCpy $2 $3
+    IntOp $1 $1 + 1
+    Goto canonical_component
+  canonical_components_done:
+  System::Call 'kernel32::GetFullPathNameW(w r0, i ${NSIS_MAX_STRLEN}, w .r1, p 0) i.r2 ?e'
+  Pop $NativeError
+  ${If} $2 == 0
+    Call ${PREFIX}DataRefusal
+  ${EndIf}
+  ${If} $2 >= ${NSIS_MAX_STRLEN}
+    StrCpy $NativeError 122
+    Call ${PREFIX}DataRefusal
+  ${EndIf}
+  ; NSIS's normal uninstaller appends a separator to _?=; normalize that
+  ; spelling without turning a drive/share root into a relative path.
+  ${GetRoot} "$1" $4
+  StrCpy $5 $1 1 -1
+  ${If} $5 == "\"
+  ${AndIf} $1 != $4
+  ${AndIf} $1 != "$4\"
+    StrCpy $1 $1 -1
+  ${EndIf}
+  StrCpy $0 $1
+  StrCpy $3 ""
+  canonical_existing_ancestor:
+    System::Call 'kernel32::GetLongPathNameW(w r0, w .r1, i ${NSIS_MAX_STRLEN}) i.r2 ?e'
+    Pop $NativeError
+    ${If} $2 == 0
+      ${If} $NativeError != 2
+      ${AndIf} $NativeError != 3
+        Call ${PREFIX}DataRefusal
+      ${EndIf}
+      ${GetRoot} "$0" $5
+      ${GetParent} "$0" $4
+      ${If} $0 == $5
+      ${OrIf} $0 == "$5\"
+      ${OrIf} $4 == ""
+        Call ${PREFIX}DataRefusal
+      ${EndIf}
+      StrLen $6 $4
+      ${If} $6 == 2
+        StrCpy $4 "$4\"
+      ${EndIf}
+      StrLen $6 $4
+      StrLen $5 $0
+      ${If} $6 >= $5
+        Call ${PREFIX}DataRefusal
+      ${EndIf}
+      ${GetFileName} "$0" $5
+      ${If} $5 == ""
+        Call ${PREFIX}DataRefusal
+      ${EndIf}
+      StrLen $6 $5
+      StrLen $2 $3
+      IntOp $6 $6 + $2
+      IntOp $6 $6 + 1
+      ${If} $6 >= ${NSIS_MAX_STRLEN}
+        StrCpy $NativeError 122
+        Call ${PREFIX}DataRefusal
+      ${EndIf}
+      StrCpy $3 "\$5$3"
+      StrCpy $0 $4
+      Goto canonical_existing_ancestor
+    ${EndIf}
+    ${If} $2 >= ${NSIS_MAX_STRLEN}
+      StrCpy $NativeError 122
+      Call ${PREFIX}DataRefusal
+    ${EndIf}
+  StrCpy $4 $1 1 -1
+  ${If} $4 == "\"
+  ${AndIf} $3 != ""
+    StrCpy $1 $1 -1
+  ${EndIf}
+  StrLen $4 $1
+  StrLen $5 $3
+  IntOp $4 $4 + $5
+  ${If} $4 >= ${NSIS_MAX_STRLEN}
+    StrCpy $NativeError 122
+    Call ${PREFIX}DataRefusal
+  ${EndIf}
+  StrCpy $NativeError 0
+  StrCpy $0 "$1$3"
+  Pop $6
+  Pop $5
+  Pop $4
+  Pop $3
+  Pop $2
+  Pop $1
+  Exch $0
+FunctionEnd
+
 Function ${PREFIX}InitializeDataPaths
   StrCpy $DirectoryLocks 0
   StrCpy $DirectoryLockCount 0
@@ -239,15 +364,25 @@ Function ${PREFIX}InitializeDataPaths
   StrCpy $ProgramDirectoryLock 0
   StrCpy $OptionalDirectoryRemoval 0
   StrCpy $ShortcutDelete 0
-  GetFullPathName $INSTDIR "$INSTDIR"
+  Push "$INSTDIR"
+  Call ${PREFIX}CanonicalizePath
+  Pop $INSTDIR
 !ifdef PB_SYNTHETIC_FIXTURE
   StrCmpS $INSTDIR "${PB_SYNTHETIC_ROOT}\app" +2
     Call ${PREFIX}DataRefusal
-  GetFullPathName $LocalDataRoot "${PB_SYNTHETIC_ROOT}\local\PrivacyBrowser"
-  GetFullPathName $RoamingDataRoot "${PB_SYNTHETIC_ROOT}\roaming\PrivacyBrowser"
+  Push "${PB_SYNTHETIC_ROOT}\local\PrivacyBrowser"
+  Call ${PREFIX}CanonicalizePath
+  Pop $LocalDataRoot
+  Push "${PB_SYNTHETIC_ROOT}\roaming\PrivacyBrowser"
+  Call ${PREFIX}CanonicalizePath
+  Pop $RoamingDataRoot
 !else
-  GetFullPathName $LocalDataRoot "$LOCALAPPDATA\PrivacyBrowser"
-  GetFullPathName $RoamingDataRoot "$APPDATA\PrivacyBrowser"
+  Push "$LOCALAPPDATA\PrivacyBrowser"
+  Call ${PREFIX}CanonicalizePath
+  Pop $LocalDataRoot
+  Push "$APPDATA\PrivacyBrowser"
+  Call ${PREFIX}CanonicalizePath
+  Pop $RoamingDataRoot
 !endif
   ; Stay below legacy Win32 path limits; never operate on truncated aliases.
   StrLen $0 $INSTDIR
