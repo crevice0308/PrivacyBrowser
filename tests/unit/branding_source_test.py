@@ -165,6 +165,16 @@ def FirefoxBranding():
                     self.assertEqual(actual, expected.encode("utf-8"))
                     self.assertNotIn(b"\r", actual)
 
+    def test_windows_mozconfig_preserves_supported_native_msvc_target(self):
+        # The pinned ESR rejects legacy -mingw32/-mingw64 triples. Its native
+        # win64 mozconfig uses this MSVC ABI target (and clang-cl toolchain).
+        configured = (ROOT / "config/mozconfig.windows").read_bytes()
+        targets = [line.strip() for line in configured.decode("utf-8").splitlines()
+                   if line.strip().startswith("ac_add_options --target=")]
+        self.assertEqual(targets, ["ac_add_options --target=x86_64-pc-windows-msvc"])
+        self.prepare()
+        self.assertEqual((self.source / "mozconfig").read_bytes(), configured)
+
     def test_native_product_fields_and_engine_identity(self):
         result = self.prepare()
         self.assertIn('MOZ_APP_DISPLAYNAME="PrivacyBrowser"', (self.target / "configure.sh").read_text())

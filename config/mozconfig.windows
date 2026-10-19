@@ -1,7 +1,7 @@
 # Run from MozillaBuild on a Windows 11 x64 build host.
 mk_add_options MOZ_OBJDIR=@TOPSRCDIR@/obj-privacybrowser
 ac_add_options --enable-application=browser
-ac_add_options --target=x86_64-pc-mingw32
+ac_add_options --target=x86_64-pc-windows-msvc
 ac_add_options --with-branding=browser/branding/privacybrowser
 ac_add_options --disable-official-branding
 ac_add_options --with-app-name=privacybrowser
