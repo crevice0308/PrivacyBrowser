@@ -1,0 +1,59 @@
+name: Windows native build capacity
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/windows-capacity.yml']
+
+# This diagnostic workflow neither checks out nor executes project source.
+permissions: {}
+
+concurrency:
+  group: windows-native-capacity
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - name: Inspect hosted Windows build resources without modifying the runner
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $computer = Get-CimInstance Win32_ComputerSystem
+          $os = Get-CimInstance Win32_OperatingSystem
+          $drives = @(Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Name -in @('C', 'D') } | ForEach-Object {
+            [ordered]@{
+              drive = $_.Name
+              freeGiB = [math]::Round($_.Free / 1GB, 2)
+              usedGiB = [math]::Round($_.Used / 1GB, 2)
+              meetsMozilla40GiBMinimum = ($_.Free -ge 40GB)
+            }
+          })
+          $tools = [ordered]@{}
+          foreach ($name in @('python', 'git', 'rustc', 'cargo', 'clang', 'clang-cl', 'gpg', 'makensis', 'bash')) {
+            $command = Get-Command $name -ErrorAction SilentlyContinue | Select-Object -First 1
+            $tools[$name] = if ($command) { $command.Source } else { $null }
+          }
+          $report = [ordered]@{
+            purpose = 'Read-only preflight for a genuinely source-built PrivacyBrowser Windows executable'
+            os = $os.Caption
+            version = $os.Version
+            cpuLogical = $computer.NumberOfLogicalProcessors
+            memoryGiB = [math]::Round($computer.TotalPhysicalMemory / 1GB, 2)
+            disks = $drives
+            tools = $tools
+            mozillaBuildInstalled = (Test-Path 'C:\mozilla-build\start-shell.bat')
+            visualStudioLocatorInstalled = (Test-Path "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe")
+            sourceDownloaded = $false
+            buildAttempted = $false
+            systemSettingsChanged = $false
+          }
+          $json = $report | ConvertTo-Json -Depth 6
+          Write-Output $json
+          @('## Windows native-build preflight', '', '```json', $json, '```', '', 'This probe did not install software, change security settings, delete files, download Gecko, build, sign, or publish any artifact.') | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+          if (-not ($drives | Where-Object { $_.meetsMozilla40GiBMinimum })) {
+            Write-Warning 'No inspected drive meets Mozilla documented 40 GiB Windows build minimum. Native build is blocked pending a suitable authorized environment.'
+          }
