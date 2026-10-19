@@ -7,6 +7,7 @@
 
 Function NativeSafetyFixtureMain
   ; Verify the reviewed NT ABI on an ordinary Unicode file before any cleanup.
+  !insertmacro SyntheticPhase "" "ordinary-unicode-open"
   StrCpy $NativeAccess 0x80000000
   StrCpy $NativeShare 1
   StrCpy $NativeDisposition 1
@@ -17,38 +18,54 @@ Function NativeSafetyFixtureMain
   ${If} $0 == -1
     Call DataRefusal
   ${EndIf}
+  !insertmacro SyntheticPhase "" "ordinary-unicode-close"
   System::Call 'kernel32::CloseHandle(p r0) i.r1'
   ${If} $1 == 0
     Call DataRefusal
   ${EndIf}
+  !insertmacro SyntheticPhase "" "initialize-data-paths"
   Call InitializeDataPaths
+  !insertmacro SyntheticPhase "" "check-empty-application"
   IfFileExists "$INSTDIR\*.*" 0 +2
     Call DataRefusal
+  !insertmacro SyntheticPhase "" "lock-fixture-parent"
   Push "${PB_SYNTHETIC_ROOT}"
   Call LockDirectoryChain
+  !insertmacro SyntheticPhase "" "create-application-directory"
   CreateDirectory "$INSTDIR"
+  !insertmacro SyntheticPhase "" "lock-application-directory"
   Call LockInstallDirectory
+  !insertmacro SyntheticPhase "" "ensure-owned-local-root"
   Push $LocalDataRoot
   Call EnsureOwnedRoot
+  !insertmacro SyntheticPhase "" "ensure-owned-roaming-root"
   Push $RoamingDataRoot
   Call EnsureOwnedRoot
   ; This generated uninstaller invokes only the paired synthetic entry below.
+  !insertmacro SyntheticPhase "" "write-synthetic-uninstaller"
   ClearErrors
   WriteUninstaller "$INSTDIR\uninstall.exe"
   IfErrors 0 +2
     Call DataRefusal
+  !insertmacro SyntheticPhase "" "initialization-complete"
   SetErrorLevel 0
 FunctionEnd
 
 Function un.NativeSafetyFixtureMain
+  !insertmacro SyntheticPhase "un." "uninstall-initialize-data-paths"
   Call un.InitializeDataPaths
+  !insertmacro SyntheticPhase "un." "uninstall-lock-application"
   Call un.LockInstallDirectory
+  !insertmacro SyntheticPhase "un." "uninstall-verify-local-root"
   Push $LocalDataRoot
   Call un.VerifyOwnedRoot
+  !insertmacro SyntheticPhase "un." "uninstall-verify-roaming-root"
   Push $RoamingDataRoot
   Call un.VerifyOwnedRoot
   ; Reuse the complete production traversal and marker-last cleanup routines.
   ; Registration, shortcuts, payload files and browsers are never involved.
+  !insertmacro SyntheticPhase "un." "uninstall-purge-owned-data"
   Call un.PurgeOwnedData
+  !insertmacro SyntheticPhase "un." "uninstall-complete"
   SetErrorLevel 0
 FunctionEnd

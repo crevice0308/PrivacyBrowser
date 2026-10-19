@@ -887,6 +887,40 @@ class NativeInstallerTemplateTests(unittest.TestCase):
         self.assertIn("Call un.PurgeOwnedData", uninstall.group(1))
         self.assertIn("!insertmacro RemoveNativePayload", uninstall.group(1))
 
+    def test_synthetic_diagnostics_are_bounded_stdout_only_and_preserve_registers(self):
+        self.assertRegex(self.commands, r"(?ms)^!ifdef PB_SYNTHETIC_FIXTURE\nFunction \$\{PREFIX\}TraceSyntheticState\n.*?^FunctionEnd\n!endif")
+        trace = self.function("${PREFIX}TraceSyntheticState")
+        self.assertIn('${If} $SyntheticTraceCount >= 64', trace)
+        self.assertIn('${AndIf} $SyntheticEvent != "refusal"', trace)
+        self.assertIn("kernel32::GetStdHandle(i -11) p.r0", trace)
+        self.assertIn("kernel32::WriteFile(p r0, m r1, i r2, *i.r3, p 0) i.r4", trace)
+        for field in ("phase=$SyntheticPhase", "event=$SyntheticEvent", "ntstatus=$SyntheticNtStatus",
+                      "native_error=$NativeError", "path_chars=$SyntheticPathCharacters"):
+            self.assertIn(field, trace)
+        self.assertEqual(re.findall(r"(?m)^\s*Push (\$\d)$", trace), [f"${index}" for index in range(5)])
+        self.assertEqual(re.findall(r"(?m)^\s*Pop (\$\d)$", trace), [f"${index}" for index in reversed(range(5))])
+        self.assertNotRegex(trace, r"(?i)CreateFile|FileOpen|OpenNoReparse|WriteReg|Delete|CloseHandle|DataRefusal")
+        refusal = self.function("${PREFIX}DataRefusal")
+        self.assertRegex(refusal, r'!ifdef PB_SYNTHETIC_FIXTURE\s+StrCpy \$SyntheticEvent "refusal"\s+Call \$\{PREFIX\}TraceSyntheticState\s+!endif')
+        opener = self.function("${PREFIX}OpenNoReparse")
+        self.assertRegex(opener, r"i\.r8'\s+!ifdef PB_SYNTHETIC_FIXTURE\s+StrCpy \$SyntheticNtStatus \$8\s+!endif")
+        self.assertLess(opener.index("StrCpy $SyntheticNtStatus $8"), opener.index("RtlNtStatusToDosError"))
+        self.assertRegex(opener, r'!ifdef PB_SYNTHETIC_FIXTURE\s+StrCpy \$SyntheticEvent "nt-open"\s+Call \$\{PREFIX\}TraceSyntheticState\s+!endif')
+
+    def test_synthetic_init_diagnostics_identify_each_phase_before_work(self):
+        fixture = (ROOT / "packaging/windows/native-safety-fixture.nsh").read_text(encoding="utf-8")
+        for prefix, phases in (("", ("ordinary-unicode-open", "ordinary-unicode-close", "initialize-data-paths",
+                                    "check-empty-application", "lock-fixture-parent", "create-application-directory",
+                                    "lock-application-directory", "ensure-owned-local-root", "ensure-owned-roaming-root",
+                                    "write-synthetic-uninstaller", "initialization-complete")),
+                               ("un.", ("uninstall-initialize-data-paths", "uninstall-lock-application",
+                                        "uninstall-verify-local-root", "uninstall-verify-roaming-root",
+                                        "uninstall-purge-owned-data", "uninstall-complete"))):
+            self.assertEqual(re.findall(r'!insertmacro SyntheticPhase "' + re.escape(prefix) + r'" "([a-z-]+)"', fixture), list(phases))
+        self.assertLess(fixture.index('"ordinary-unicode-open"'), fixture.index("Call OpenNoReparse"))
+        self.assertLess(fixture.index('"initialize-data-paths"'), fixture.index("Call InitializeDataPaths"))
+        self.assertLess(fixture.index('"uninstall-purge-owned-data"'), fixture.index("Call un.PurgeOwnedData"))
+
 
 class HostedInstallerTestContractTests(unittest.TestCase):
     """Inspect the hosted-only PowerShell test as text; never invoke it here."""

@@ -42,6 +42,19 @@ Var ShortcutDelete
   !ifndef PB_SYNTHETIC_INCLUDE
     !error "Synthetic builds require the reviewed fixture entry include"
   !endif
+  Var SyntheticPhase
+  Var SyntheticEvent
+  Var SyntheticNtStatus
+  Var SyntheticPathCharacters
+  Var SyntheticTraceCount
+!endif
+
+!ifdef PB_SYNTHETIC_FIXTURE
+!macro SyntheticPhase PREFIX NAME
+  StrCpy $SyntheticPhase "${NAME}"
+  StrCpy $SyntheticEvent "phase"
+  Call ${PREFIX}TraceSyntheticState
+!macroend
 !endif
 !ifndef RUNTIME_DIR
   !error "Set RUNTIME_DIR to a validated independently source-built AMD64 runtime"
@@ -99,10 +112,44 @@ VIAddVersionKey /LANG=1033 "LegalCopyright" "MPL-2.0; upstream licenses retained
 ; overrides and paths read from profile or launcher settings are never followed.
 !macro OwnershipFunctions PREFIX
 Function ${PREFIX}DataRefusal
+!ifdef PB_SYNTHETIC_FIXTURE
+  StrCpy $SyntheticEvent "refusal"
+  Call ${PREFIX}TraceSyntheticState
+!endif
   MessageBox MB_OK|MB_ICONSTOP "PrivacyBrowser user-data ownership or file-safety checks failed. No further files will be removed. Close the application and resolve the unsafe or locked path before retrying. Uninstall recovery information is retained." /SD IDOK
   SetErrorLevel 1
   Abort
 FunctionEnd
+
+!ifdef PB_SYNTHETIC_FIXTURE
+; ASCII-only diagnostics go to the parent's already-open log handle. Never open
+; a diagnostic path, alter a safety decision, or recurse into the native opener.
+; At most 64 trace lines plus the terminal refusal are emitted per process.
+Function ${PREFIX}TraceSyntheticState
+  ${If} $SyntheticTraceCount >= 64
+  ${AndIf} $SyntheticEvent != "refusal"
+    Return
+  ${EndIf}
+  IntOp $SyntheticTraceCount $SyntheticTraceCount + 1
+  Push $0
+  Push $1
+  Push $2
+  Push $3
+  Push $4
+  StrCpy $1 "PB_SYNTHETIC phase=$SyntheticPhase event=$SyntheticEvent ntstatus=$SyntheticNtStatus native_error=$NativeError path_chars=$SyntheticPathCharacters access=$NativeAccess share=$NativeShare disposition=$NativeDisposition options=$NativeOptions$\r$\n"
+  StrLen $2 $1
+  System::Call 'kernel32::GetStdHandle(i -11) p.r0'
+  ${If} $0 != 0
+  ${AndIf} $0 != -1
+    System::Call 'kernel32::WriteFile(p r0, m r1, i r2, *i.r3, p 0) i.r4'
+  ${EndIf}
+  Pop $4
+  Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
+FunctionEnd
+!endif
 
 ; Open an absolute native path with the kernel's all-components no-reparse
 ; guarantee. Unlike CreateFileW OPEN_REPARSE_POINT alone, OBJ_DONT_REPARSE also
@@ -127,6 +174,9 @@ Function ${PREFIX}OpenNoReparse
     StrCpy $0 "\??\$0"
   ${EndIf}
   StrLen $2 $0
+!ifdef PB_SYNTHETIC_FIXTURE
+  StrCpy $SyntheticPathCharacters $2
+!endif
   ${If} $2 > 900
     Call ${PREFIX}DataRefusal
   ${EndIf}
@@ -146,6 +196,9 @@ Function ${PREFIX}OpenNoReparse
   IntOp $8 $NativeAccess | 0x100000
   IntOp $9 $NativeOptions | 0x00200020
   System::Call 'ntdll::NtCreateFile(*p.r7, i r8, p r5, p r6, p 0, i 0, i $NativeShare, i $NativeDisposition, i r9, p 0, i 0) i.r8'
+!ifdef PB_SYNTHETIC_FIXTURE
+  StrCpy $SyntheticNtStatus $8
+!endif
   StrCpy $NativeError 0
   IntOp $9 $8 & 0x80000000
   ${If} $9 != 0
@@ -153,6 +206,10 @@ Function ${PREFIX}OpenNoReparse
     StrCpy $NativeError $9
     StrCpy $7 -1
   ${EndIf}
+!ifdef PB_SYNTHETIC_FIXTURE
+  StrCpy $SyntheticEvent "nt-open"
+  Call ${PREFIX}TraceSyntheticState
+!endif
   System::Free $6
   System::Free $5
   System::Free $4
@@ -741,16 +798,22 @@ FunctionEnd
 
 !ifdef PB_SYNTHETIC_FIXTURE
 Function ${PREFIX}RequireSyntheticEnvironment
+  StrCpy $SyntheticTraceCount 0
+  StrCpy $SyntheticNtStatus "not-called"
+  StrCpy $NativeError "not-called"
+  !insertmacro SyntheticPhase "${PREFIX}" "host-environment"
   ReadEnvStr $0 "GITHUB_ACTIONS"
   ReadEnvStr $1 "RUNNER_ENVIRONMENT"
   StrCmpS $0 "true" +2
     Call ${PREFIX}DataRefusal
   StrCmpS $1 "github-hosted" +2
     Call ${PREFIX}DataRefusal
+  !insertmacro SyntheticPhase "${PREFIX}" "executable-directory"
   StrCmpS $EXEDIR "${PB_SYNTHETIC_ROOT}" fixture_directory_ok
   StrCmpS $EXEDIR "${PB_SYNTHETIC_ROOT}\app" fixture_directory_ok
   Call ${PREFIX}DataRefusal
   fixture_directory_ok:
+  !insertmacro SyntheticPhase "${PREFIX}" "environment-accepted"
 FunctionEnd
 !endif
 !macroend
