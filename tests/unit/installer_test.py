@@ -8,7 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import shutil
 import struct
@@ -172,6 +172,30 @@ class WindowsPayloadManifestTests(unittest.TestCase):
             parent = child.rpartition("\\")[0]
             if parent in removed:
                 self.assertLess(removed.index(child), removed.index(parent))
+
+    def test_file_sources_use_compiler_host_separators_on_both_platforms(self):
+        for path_type, location in ((PureWindowsPath, r"D:\pb\fixture runtime"),
+                                    (PurePosixPath, "/tmp/pb/fixture runtime")):
+            with self.subTest(platform=path_type.__name__):
+                root = path_type(location)
+                files = [root / "privacybrowser.exe",
+                         root / "distribution/privacybrowser/assets/privacybrowser.ico"]
+                runtime = mock.Mock()
+                runtime.resolve.return_value = root
+                include = self.root / "host-path-payload.nsh"
+                # Model either compiler host without changing the actual OS or
+                # touching a Windows drive; only the reviewed inventory is mocked.
+                with mock.patch.object(package_windows, "Path", path_type), \
+                     mock.patch.object(package_windows, "runtime_files", return_value=files):
+                    package_windows.write_payload_include(runtime, include)
+                source = include.read_text(encoding="utf-8")
+                self.assertEqual(re.findall(r'(?m)^  File "([^"\r\n]+)"$', source),
+                                 [str(path) for path in files])
+                self.assertIn('  SetOutPath "$INSTDIR"\n', source)
+                self.assertIn('  SetOutPath "$INSTDIR\\distribution\\privacybrowser\\assets"\n', source)
+                self.assertEqual(re.findall(r'(?m)^  Delete "([^"\r\n]+)"$', source),
+                                 ["$INSTDIR\\privacybrowser.exe",
+                                  "$INSTDIR\\distribution\\privacybrowser\\assets\\privacybrowser.ico"])
 
     def test_nsis_metacharacters_and_control_characters_cannot_enter_payload(self):
         for name in ('dollar$.txt', 'quote".txt', 'line\nbreak.txt', 'control\ttab.txt', 'colon:name.txt'):

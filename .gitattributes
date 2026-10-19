@@ -1,0 +1,7 @@
+# Keep source/legal-notice bytes identical on Linux and Windows checkouts.
+* text=auto eol=lf
+
+# Never normalize project artwork bytes.
+*.png binary
+*.ico binary
+*.bmp binary

@@ -80,7 +80,8 @@ def write_payload_include(runtime:Path,destination:Path)->dict:
     for path in files:
         relative=path.relative_to(runtime)
         folder='' if relative.parent==Path('.') else '\\'+str(relative.parent).replace('/','\\')
-        lines += ['  SetOutPath "$INSTDIR'+folder+'"','  File "'+path.as_posix()+'"']
+        # NSIS File splits source paths using the compiler host's separator.
+        lines += ['  SetOutPath "$INSTDIR'+folder+'"','  File "'+str(path)+'"']
     lines += ['!macroend','','!macro RemovePayload']
     for path in files:
         relative=path.relative_to(runtime).as_posix().replace('/','\\')
