@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 UPSTREAM_VERSION = json.loads((ROOT / "config/esr.json").read_text())["upstream_version"].removesuffix("esr")
@@ -139,6 +140,18 @@ class WindowsPayloadManifestTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.runtime = make_runtime(self.root)
 
+    def assert_inventory_names_rejected(self, names, message):
+        # Windows cannot materialize some invalid names (or treats ':' as an
+        # alternate data stream); case aliases cannot coexist on its usual FS.
+        # Mock only filesystem enumeration/type checks, never the validator.
+        entries = [self.runtime.resolve() / name for name in names]
+        with mock.patch.object(Path, "rglob", return_value=entries), \
+             mock.patch.object(Path, "is_symlink", return_value=False), \
+             mock.patch.object(Path, "is_file", return_value=True):
+            with self.assertRaisesRegex(ValueError, message):
+                package_windows.write_payload_include(self.runtime, self.root / "payload.nsh")
+        self.assertFalse((self.root / "payload.nsh").exists())
+
     def test_payload_uses_exact_files_and_removes_children_before_parent(self):
         (self.runtime / "extra nested/a b").mkdir(parents=True)
         (self.runtime / "extra nested/a b/file (1).txt").write_text("payload")
@@ -163,6 +176,9 @@ class WindowsPayloadManifestTests(unittest.TestCase):
     def test_nsis_metacharacters_and_control_characters_cannot_enter_payload(self):
         for name in ('dollar$.txt', 'quote".txt', 'line\nbreak.txt', 'control\ttab.txt', 'colon:name.txt'):
             with self.subTest(name=name):
+                self.assert_inventory_names_rejected([name], "Unsafe Windows/NSIS payload filename")
+                if sys.platform == "win32":
+                    continue
                 path = self.runtime / name
                 path.write_text("hostile payload filename")
                 try:
@@ -172,8 +188,14 @@ class WindowsPayloadManifestTests(unittest.TestCase):
                     path.unlink()
 
     def test_windows_device_names_and_case_collisions_are_rejected(self):
+        original_xul = (self.runtime / "xul.dll").read_bytes()
         for name in ("CON", "nul.txt", "COM1.log", "XUL.dll"):
             with self.subTest(name=name):
+                names = ["xul.dll", name] if name == "XUL.dll" else [name]
+                message = "Case-colliding Windows payload paths" if name == "XUL.dll" else "Unsafe Windows/NSIS payload filename"
+                self.assert_inventory_names_rejected(names, message)
+                if sys.platform == "win32":
+                    continue
                 path = self.runtime / name
                 path.write_text("cannot safely materialize on Windows")
                 try:
@@ -181,6 +203,7 @@ class WindowsPayloadManifestTests(unittest.TestCase):
                         package_windows.write_payload_include(self.runtime, self.root / "payload.nsh")
                 finally:
                     path.unlink()
+        self.assertEqual((self.runtime / "xul.dll").read_bytes(), original_xul)
 
     @unittest.skipIf(sys.platform == "win32", "POSIX metacharacter path fixture")
     def test_nsis_metacharacters_in_staging_parent_are_rejected(self):

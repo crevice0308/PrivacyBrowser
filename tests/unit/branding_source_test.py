@@ -44,8 +44,8 @@ class NativeBrandingSourceTests(unittest.TestCase):
         self.source, self.overlay = root / "source", root / "overlay"
         self.source.mkdir()
         self.overlay.mkdir()
-        (self.overlay / "bootstrap.cfg").write_text("// Fixture config\n")
-        (self.overlay / "chrome.manifest").write_text("content privacybrowser content/\n")
+        (self.overlay / "bootstrap.cfg").write_text("// Fixture config\n", encoding="utf-8", newline="\n")
+        (self.overlay / "chrome.manifest").write_text("content privacybrowser content/\n", encoding="utf-8", newline="\n")
         shutil.copytree(ROOT / "browser/privacy/assets", self.overlay / "assets")
         self.brand = self.source / "browser/branding/unofficial"
         self.target = self.source / "browser/branding/privacybrowser"
@@ -85,10 +85,12 @@ def FirefoxBranding():
         ]
 ''',
         }
+        # The pinned upstream archive contains LF bytes, including on Windows.
+        self.source_text_fixtures = files
         for relative, text in files.items():
             path = self.source / relative
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text, encoding="utf-8")
+            path.write_text(text, encoding="utf-8", newline="\n")
         app = self.source / "browser/app"
         app.mkdir(exist_ok=True)
         (app / "firefox.exe.manifest").write_bytes(MANIFEST)
@@ -128,12 +130,13 @@ def FirefoxBranding():
             "CertIssuerDownload": "DigiCert Trusted G4 Code Signing RSA4096 SHA384 2021 CA1",
         }
         brand_files["branding.nsi"] = LEGAL + "\n".join(f'!define {name} "{value}"' for name, value in nsis_values.items()) + "\n"
+        self.brand_text_fixtures = brand_files
         for relative, text in brand_files.items():
             path = self.brand / relative
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text, encoding="utf-8")
+            path.write_text(text, encoding="utf-8", newline="\n")
         for name in ("about-logo.svg", "about-wordmark.svg", "firefox-wordmark.svg", "document_pdf.svg"):
-            (self.brand / "content" / name).write_text('<svg xmlns="http://www.w3.org/2000/svg"><text>Nightly</text></svg>')
+            (self.brand / "content" / name).write_text('<svg xmlns="http://www.w3.org/2000/svg"><text>Nightly</text></svg>', encoding="utf-8", newline="\n")
         for size in (16, 32, 48, 64, 128):
             Image.new("RGBA", (size, size), "red").save(self.brand / f"default{size}.png")
         for prefix in ("VisualElements", "PrivateBrowsing"):
@@ -152,6 +155,15 @@ def FirefoxBranding():
             self.prepare()
         self.assertEqual(snapshot(self.source), before)
         self.assertFalse(self.target.exists())
+
+    def test_pinned_upstream_text_fixtures_are_exact_utf8_lf_bytes(self):
+        for root, fixtures in ((self.source, self.source_text_fixtures),
+                               (self.brand, self.brand_text_fixtures)):
+            for relative, expected in fixtures.items():
+                with self.subTest(path=(root / relative).relative_to(self.source)):
+                    actual = (root / relative).read_bytes()
+                    self.assertEqual(actual, expected.encode("utf-8"))
+                    self.assertNotIn(b"\r", actual)
 
     def test_native_product_fields_and_engine_identity(self):
         result = self.prepare()
@@ -247,7 +259,7 @@ def FirefoxBranding():
         self.assertTrue(windows.startswith(LEGAL))
 
     def test_unknown_shell_identity_layout_is_fail_closed(self):
-        (self.source / "browser/components/shell/WindowsDefaultBrowser.cpp").write_text(LEGAL)
+        (self.source / "browser/components/shell/WindowsDefaultBrowser.cpp").write_text(LEGAL, encoding="utf-8", newline="\n")
         self.assert_rejected_unchanged()
 
     def test_startup_error_caption_is_exact_product_name(self):
@@ -263,7 +275,7 @@ def FirefoxBranding():
         original = path.read_text()
         for value in (original.replace('L"Firefox"', 'L"Other"'), original + original):
             with self.subTest(value=value):
-                path.write_text(value)
+                path.write_text(value, encoding="utf-8", newline="\n")
                 self.assert_rejected_unchanged()
 
     def test_upstream_installer_and_default_agent_disabled_for_this_product(self):
@@ -275,7 +287,7 @@ def FirefoxBranding():
 
     def test_changed_nsis_discovery_is_fail_closed(self):
         path = self.source / "moz.configure"
-        path.write_text(path.read_text().replace('bootstrap="nsis/bin"', 'bootstrap="changed/nsis"'))
+        path.write_text(path.read_text().replace('bootstrap="nsis/bin"', 'bootstrap="changed/nsis"'), encoding="utf-8", newline="\n")
         self.assert_rejected_unchanged()
 
     def test_missing_native_resource_is_fail_closed(self):
@@ -284,7 +296,7 @@ def FirefoxBranding():
 
     def test_missing_jar_asset_is_fail_closed(self):
         path = self.brand / "content/jar.mn"
-        path.write_text(path.read_text() + "  content/branding/newly-required.png\n")
+        path.write_text(path.read_text() + "  content/branding/newly-required.png\n", encoding="utf-8", newline="\n")
         self.assert_rejected_unchanged()
 
     def test_engine_version_resource_changes_need_review(self):
@@ -297,7 +309,7 @@ def FirefoxBranding():
         original = path.read_text()
         for value in (LEGAL, original + "MOZ_APP_DISPLAYNAME=Other\n"):
             with self.subTest(value=value):
-                path.write_text(value)
+                path.write_text(value, encoding="utf-8", newline="\n")
                 self.assert_rejected_unchanged()
 
     def test_missing_native_metadata_field_is_fail_closed(self):
@@ -306,7 +318,7 @@ def FirefoxBranding():
         self.assert_rejected_unchanged()
 
     def test_unknown_svg_is_fail_closed(self):
-        (self.brand / "content/new-logo.svg").write_text("<svg/>")
+        (self.brand / "content/new-logo.svg").write_text("<svg/>", encoding="utf-8", newline="\n")
         self.assert_rejected_unchanged()
 
     def test_corrupt_upstream_image_is_fail_closed(self):
@@ -318,7 +330,7 @@ def FirefoxBranding():
         self.assert_rejected_unchanged()
 
     def test_wrong_esr_version_is_fail_closed(self):
-        (self.source / "browser/config/version.txt").write_text("1.0\n")
+        (self.source / "browser/config/version.txt").write_text("1.0\n", encoding="utf-8", newline="\n")
         self.assert_rejected_unchanged()
 
     def test_unknown_target_does_not_mutate_source(self):

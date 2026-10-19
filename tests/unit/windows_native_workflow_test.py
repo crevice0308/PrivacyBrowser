@@ -43,16 +43,39 @@ class NativeWorkflowTests(unittest.TestCase):
         self.assertEqual((destination / "PrivacyBrowser/notice.txt").read_bytes(), b"inert")
 
     def test_rejects_unsafe_names_before_any_output(self):
-        for name in ("../escape", "/absolute", "C:/drive", "foo\\bar", "file.", "AUX.txt", "NUL", "x/../y"):
+        for index, name in enumerate(("../escape", "/absolute", "C:/drive", "foo\\bar", "file.", "AUX.txt", "NUL", "x/../y")):
             with self.subTest(name=name):
-                archive = self.root / ("bad" + str(len(list(self.root.iterdir()))) + ".zip")
+                archive = self.root / ("bad" + str(index) + ".zip")
                 with zipfile.ZipFile(archive, "x") as stream:
                     stream.writestr("first.txt", b"safe")
-                    stream.writestr(name, b"bad")
-                destination = self.root / "unpacked"
+                    member = zipfile.ZipInfo(name)
+                    # ZipInfo sanitizes os.sep during construction on Windows.
+                    # Restore the exact hostile name in the bytes being written.
+                    member.filename = name
+                    stream.writestr(member, b"bad")
+                with zipfile.ZipFile(archive) as stream:
+                    # orig_filename is the untouched raw-name list on every
+                    # host; namelist() itself normalizes Windows backslashes.
+                    self.assertEqual([item.orig_filename for item in stream.infolist()], ["first.txt", name])
+                destination = self.root / ("unpacked" + str(index))
                 with self.assertRaises(ValueError):
                     workflow.safe_extract_zip(archive, destination)
                 self.assertFalse(destination.exists())
+
+    def test_rejects_windows_separator_normalization_before_any_output(self):
+        member = zipfile.ZipInfo("foo\\bar")
+        member.filename = "foo\\bar"
+        archive = self.archive([("first.txt", b"safe"), (member, b"bad")])
+        # Exercise the Windows ZipInfo reader on every host without executing
+        # Windows code or weakening the extractor's production validation.
+        with mock.patch.object(zipfile.os, "sep", "\\"), mock.patch.object(zipfile.os, "altsep", "/"):
+            with zipfile.ZipFile(archive) as stream:
+                self.assertEqual(stream.namelist(), ["first.txt", "foo/bar"])
+                self.assertEqual([item.orig_filename for item in stream.infolist()], ["first.txt", "foo\\bar"])
+            destination = self.root / "unpacked"
+            with self.assertRaisesRegex(ValueError, "normalized or truncated"):
+                workflow.safe_extract_zip(archive, destination)
+            self.assertFalse(destination.exists())
 
     def test_rejects_case_collisions(self):
         archive = self.archive([("FILE", b"1"), ("file", b"2")])

@@ -92,6 +92,9 @@ def safe_extract_zip(archive: Path, destination: Path, max_bytes: int = 8 * 1024
         seen = set()
         files = set()
         for item in members:
+            # ZipInfo normalizes Windows separators and truncates at NUL even
+            # when reading. Reject any changed raw member name before output.
+            native.require(item.orig_filename == item.filename, "ZIP member name was normalized or truncated")
             name = item.filename.rstrip("/") if item.is_dir() else item.filename
             parts = native.safe_relative(name)
             folded = name.casefold()
