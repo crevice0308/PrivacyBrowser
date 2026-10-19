@@ -209,7 +209,10 @@ call "$MozillaBuild\start-shell.bat" -c "bash '$RepoUnix/tools/build_windows_nat
 exit /b %ERRORLEVEL%
 "@ | Set-Content $Launch -Encoding ascii
 & cmd.exe /d /c $Launch
-if ($LASTEXITCODE -ne 0) { throw 'MozillaBuild full-source compilation/package/xpcshell test failed.' }
+$ShellExitCode = $LASTEXITCODE
+[ordered]@{ schema_version = 1; phase = 'mozilla-build-shell'; exit_code = $ShellExitCode } |
+    ConvertTo-Json | Set-Content (Join-Path $Evidence 'mozilla-build-shell-exit.json') -Encoding utf8
+if ($ShellExitCode -ne 0) { throw "MozillaBuild shell failed with exit code $ShellExitCode; inspect phase exit records and logs." }
 
 # First unpack mach's new ZIP and perform static checks only. Browser startup
 # must wait until the installer test has created verified owned profile roots;

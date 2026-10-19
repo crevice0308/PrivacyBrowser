@@ -165,12 +165,26 @@ class NativeWorkflowTests(unittest.TestCase):
 
     def test_bootstrap_has_no_system_changes_and_no_artifact_mode(self):
         source = (ROOT / "tools/build_windows_native.sh").read_text()
-        self.assertIn("--application-choice browser --no-system-changes", source)
+        import run_mach_bootstrap
+        self.assertEqual(run_mach_bootstrap.BOOTSTRAP_ARGS,
+                         ["--no-interactive", "bootstrap", "--application-choice", "browser",
+                          "--no-system-changes"])
+        self.assertIn('run_logged bootstrap python3 "$script_dir/run_mach_bootstrap.py"', source)
         self.assertIn("./mach build", source)
         self.assertIn("./mach package", source)
         self.assertNotIn("--enable-artifact-builds", source)
         self.assertNotIn("Set-MpPreference", source)
         self.assertNotIn("Add-MpPreference", source)
+
+    def test_shell_launch_exit_is_recorded_before_failure(self):
+        source = (ROOT / "tools/build_windows_native.ps1").read_text()
+        launch = source.index("& cmd.exe /d /c $Launch")
+        capture = source.index("$ShellExitCode = $LASTEXITCODE", launch)
+        evidence = source.index("'mozilla-build-shell-exit.json'", capture)
+        failure = source.index("if ($ShellExitCode -ne 0)", evidence)
+        self.assertLess(launch, capture)
+        self.assertLess(capture, evidence)
+        self.assertLess(evidence, failure)
 
     def test_mozillabuild_uses_fresh_vendor_default_and_retains_attempt_evidence(self):
         source = (ROOT / "tools/build_windows_native.ps1").read_text(encoding="utf-8")
