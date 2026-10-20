@@ -57,6 +57,18 @@ endif'''
     return replace_one(text, re.escape(original), replacement, "upstream Windows package installer recursion")
 
 
+def preserve_overlay_manifest(text: str) -> str:
+    """Keep our dynamically registered manifest out of mozpack chrome merging."""
+    original = '''        assert not self._closed
+        if is_manifest(path):
+            self._add_manifest_file(path, file)'''
+    replacement = original.replace(
+        "if is_manifest(path):",
+        'if is_manifest(path) and path != "distribution/privacybrowser/chrome.manifest":',
+    )
+    return replace_one(text, re.escape(original), replacement, "mozpack dynamic overlay manifest handling")
+
+
 def regular_file(root: Path, relative: str) -> Path:
     path = root / relative
     if not path.is_file() or any(part.is_symlink() for part in (path, *path.parents) if part != root.parent):
@@ -286,6 +298,20 @@ def branding_plan(source: Path, overlay: Path) -> dict[Path, bytes]:
         places_text, r'^firefox-appdir = "browser"$',
         'firefox-appdir = "browser"\nprivacybrowser-appdir = "browser"',
         "Places xpcshell native app directory",
+    ).encode("utf-8")
+    # AutoConfig's GreD-relative manifest must remain a real file. mozpack
+    # normally consumes *.manifest files and rebases their chrome entries;
+    # that is not appropriate for this explicitly registered loose overlay.
+    packager_module = regular_file(source, "python/mozbuild/mozpack/packager/__init__.py")
+    changes[packager_module] = preserve_overlay_manifest(packager_module.read_text(encoding="utf-8")).encode("utf-8")
+    installer_makefile = regular_file(source, "browser/installer/Makefile.in")
+    changes[installer_makefile] = replace_one(
+        installer_makefile.read_text(encoding="utf-8"),
+        r'^include \$\(topsrcdir\)/toolkit/mozapps/installer/packager\.mk$',
+        '# Keep the independently verified AutoConfig entry point in its supported loose location.\n'
+        'NON_OMNIJAR_FILES += defaults/pref/privacybrowser-autoconfig.js\n\n'
+        'include $(topsrcdir)/toolkit/mozapps/installer/packager.mk',
+        "upstream browser packager include",
     ).encode("utf-8")
     return changes
 

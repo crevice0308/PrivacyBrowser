@@ -25,6 +25,7 @@ import zipfile
 import verify_windows_native as native
 import windows_native_evidence as evidence
 import windows_pe_hardening
+import windows_autoconfig_smoke
 
 ROOT = Path(__file__).resolve().parents[1]
 REPO = "crevice0308/PrivacyBrowser"
@@ -263,6 +264,7 @@ def validate_payload(root, request):
     runtime = unpacked / "PrivacyBrowser"
     report = native.validate_candidate(runtime, root / "evidence/build-evidence.json")
     windows_pe_hardening.validate_retained(root / "evidence", runtime)
+    windows_autoconfig_smoke.validate_retained(root / "evidence", runtime)
     binary_hash = report["native_binary_sha256"]
     for name in ("LICENSE", "NOTICE"):
         require(native.regular_file(runtime, name).read_bytes() == (ROOT / name).read_bytes(), "Project legal notice mismatch")
@@ -284,6 +286,7 @@ def validate_payload(root, request):
     require(static.get("static_candidate_checks_passed") is True and static.get("native_binary_sha256") == binary_hash,
             "Native static report mismatch")
     smoke = native.load_json(root / "evidence/windows-runtime-smoke.json")
+    retained_record(root / "evidence", smoke.get("autoconfig_runtime"), "windows-autoconfig-smoke.json")
     require(type(smoke.get("schema_version")) is int and smoke["schema_version"] == 1 and smoke.get("windows_smoke_checks_passed") is True
             and smoke.get("native_binary_sha256") == binary_hash and smoke.get("release_eligible") is False
             and smoke.get("interactive_windows_ui_tested") is False and smoke.get("privacy_security_acceptance_tested") is False,

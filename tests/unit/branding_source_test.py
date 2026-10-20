@@ -77,6 +77,15 @@ endif
 endif
 ''',
             "toolkit/components/places/tests/unit/xpcshell.toml": '[DEFAULT]\nfirefox-appdir = "browser"\n\n["test_isURIVisited.js"]\n',
+            "browser/installer/Makefile.in": LEGAL + 'include $(topsrcdir)/toolkit/mozapps/installer/packager.mk\n',
+            "python/mozbuild/mozpack/packager/__init__.py": LEGAL + '''class SimplePackager:
+    def add(self, path, file):
+        assert not self._closed
+        if is_manifest(path):
+            self._add_manifest_file(path, file)
+        else:
+            self._file_queue.append(self.formatter.add, path, file)
+''',
             "browser/components/sessionstore/SessionFile.sys.mjs": session_patch.READ_ANCHOR + "\n  },\n" + session_patch.WRITE_ANCHOR + "\n  }\n",
             "browser/app/nsBrowserApp.cpp": LEGAL + '''// Firefox attribution remains unchanged.
         messageBoxW(nullptr, wide_msg, L"Firefox",
@@ -352,6 +361,26 @@ def FirefoxBranding():
         self.prepare()
         manifest = (self.source / "toolkit/components/places/tests/unit/xpcshell.toml").read_text(encoding="utf-8")
         self.assertEqual(manifest, '[DEFAULT]\nfirefox-appdir = "browser"\nprivacybrowser-appdir = "browser"\n\n["test_isURIVisited.js"]\n')
+
+    def test_autoconfig_and_dynamic_manifest_remain_loose(self):
+        self.prepare()
+        makefile = (self.source / "browser/installer/Makefile.in").read_text(encoding="utf-8")
+        self.assertIn("NON_OMNIJAR_FILES += defaults/pref/privacybrowser-autoconfig.js", makefile)
+        self.assertLess(makefile.index("NON_OMNIJAR_FILES +="), makefile.index("include $(topsrcdir)/toolkit/mozapps/installer/packager.mk"))
+        packager = (self.source / "python/mozbuild/mozpack/packager/__init__.py").read_text(encoding="utf-8")
+        self.assertIn('if is_manifest(path) and path != "distribution/privacybrowser/chrome.manifest":', packager)
+        compile(packager, "inert source fixture", "exec")
+
+    def test_changed_or_duplicate_overlay_packaging_layout_is_fail_closed(self):
+        for relative, anchor in (("browser/installer/Makefile.in", "include $(topsrcdir)/toolkit/mozapps/installer/packager.mk"),
+                                 ("python/mozbuild/mozpack/packager/__init__.py", "if is_manifest(path):")):
+            path = self.source / relative
+            original = path.read_text(encoding="utf-8")
+            for changed in (original.replace(anchor, "changed upstream anchor"), original + original):
+                with self.subTest(path=relative, changed=changed):
+                    path.write_text(changed, encoding="utf-8", newline="\n")
+                    self.assert_rejected_unchanged()
+            path.write_text(original, encoding="utf-8", newline="\n")
 
     def test_changed_or_duplicate_places_appdir_is_fail_closed(self):
         path = self.source / "toolkit/components/places/tests/unit/xpcshell.toml"

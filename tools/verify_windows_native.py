@@ -20,6 +20,8 @@ import re
 import stat
 import struct
 
+from build_dev import AUTOCONFIG
+
 ROOT = Path(__file__).resolve().parents[1]
 APP_ID = "{ec8030f7-c20a-464f-9b0e-13a3a9e97384}"
 BINARY = "privacybrowser.exe"
@@ -437,11 +439,34 @@ def verify_provenance(evidence: Path, files: dict[str, str], upstream: str, icon
             "limitation": "Retained command results, logs and source verification metadata are assertions from the build host; this static check does not reproduce the build or reverify the upstream signature."}
 
 
+def verify_startup_resources(runtime: Path) -> dict:
+    """Verify the exact loose entry points; this is not a runtime loading test."""
+    files = {}
+    for relative, source in (
+        ("privacybrowser.cfg", ROOT / "browser/privacy/bootstrap.cfg"),
+        ("distribution/privacybrowser/chrome.manifest", ROOT / "browser/privacy/chrome.manifest"),
+    ):
+        path = regular_file(runtime, relative)
+        files[relative] = digest(path)
+        require(files[relative] == digest(source), "Packaged startup resource differs from source: " + relative)
+    relative = "defaults/pref/privacybrowser-autoconfig.js"
+    path = regular_file(runtime, relative)
+    expected = AUTOCONFIG.encode("utf-8")
+    require(path.stat().st_size <= 2 * len(expected), "Packaged AutoConfig entry point is oversized")
+    # prepare_source writes text using the host newline convention. Permit CRLF
+    # or LF only; do not normalize other bytes or accept additional preferences.
+    require(path.read_bytes().replace(b"\r\n", b"\n") == expected,
+            "Packaged AutoConfig preferences differ from source")
+    files[relative] = digest(path)
+    return {"exact_startup_content_verified": True, "files": files, "runtime_loading_verified": False}
+
+
 def validate_candidate(runtime: Path, evidence: Path, icon: Path = ROOT / "browser/privacy/assets/privacybrowser.ico") -> dict:
     require(runtime.resolve() not in evidence.resolve().parents, "Source-build evidence must be outside the runtime payload")
     files = inventory(runtime)
     for name in REQUIRED:
         require(name in files, "Incomplete source-built runtime: " + name)
+    startup_resources = verify_startup_resources(runtime)
     require(not any(Path(name).name.casefold() == "firefox.exe" for name in files), "Firefox binaries cannot enter a native PrivacyBrowser candidate")
     require(not (runtime / "PRIVACY_BROWSER_BUILD.json").exists(), "Developer overlay manifests are not source-build evidence")
     config = load_json(ROOT / "config/esr.json")
@@ -471,6 +496,7 @@ def validate_candidate(runtime: Path, evidence: Path, icon: Path = ROOT / "brows
             "native_binary": BINARY, "native_binary_sha256": files[BINARY], "architecture": "AMD64",
             "upstream_version": upstream, "engine_version": engine, "native_version_resources": versions,
             "native_icons": icons, "source_build_evidence": provenance, "files": files,
+            "startup_resources": startup_resources,
             "payload_file_count": len(files), "official_release": False, "release_eligible": False,
             "authenticode_verification": "not performed", "windows_execution_tested": False,
             "windows_install_uninstall_tested": False,

@@ -110,6 +110,13 @@ installation/uninstallation untested, and Authenticode verification not performe
 Separate native-host runtime checks must have their own results. No real Windows
 binary or source build is certified by the offline fixture tests.
 
+The AutoConfig preference and dynamically registered chrome manifest must remain
+loose files at their supported GRE-relative locations. The source preparation
+exempts only these exact paths from the upstream omnijar/manifest transforms.
+Static validation checks the bootstrap and manifest against the project source
+and permits only LF/CRLF variation in the exact AutoConfig preference text. This
+does not itself prove that AutoConfig ran.
+
 This check does not replace `release_gate.py`, source review, signing, install and
 uninstall testing, profile isolation, crash recovery, security tests or a reviewed
 update service. Production publication remains blocked.
@@ -169,6 +176,15 @@ concurrent-writer case. No crash-recovery or universal concurrency guarantee is
 claimed.
 
 These checks are configured tests, not a claim that a Windows run has passed.
+After installer ownership checks, an additional bounded localhost-only Marionette
+probe uses a new disposable profile to observe automatic overlay startup. It must
+not call the overlay's startup function or override privacy settings. Automation
+recommended preferences are disabled for this test profile so they cannot mask
+the product's defaults. The probe checks already-loaded modules, effective
+privacy settings and controller readiness, content-sandbox protection, and the
+privileged home module's actual readiness. Its retained observations and hashes
+are revalidated before staging and prerelease publication. This narrow startup
+check does not establish complete privacy/security acceptance or signing.
 Interactive installer pages, Explorer icon-cache presentation, Japanese IME,
 normal browsing, memory targets and complete privacy/security acceptance need
 separate evidence. Existing supplied `tests/results/` files do not establish

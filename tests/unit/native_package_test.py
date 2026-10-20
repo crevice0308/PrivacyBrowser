@@ -130,6 +130,9 @@ def make_candidate(root: Path) -> tuple[Path, Path]:
                                              f"Version={ENGINE}\nID={native.APP_ID}\nRemotingName=privacybrowser\n")
     (runtime / "platform.ini").write_text(f"[Build]\nMilestone={ENGINE}\n")
     (runtime / "distribution/privacybrowser/assets/privacybrowser.ico").write_bytes(ICON)
+    (runtime / "privacybrowser.cfg").write_bytes((ROOT / "browser/privacy/bootstrap.cfg").read_bytes())
+    (runtime / "distribution/privacybrowser/chrome.manifest").write_bytes((ROOT / "browser/privacy/chrome.manifest").read_bytes())
+    (runtime / "defaults/pref/privacybrowser-autoconfig.js").write_bytes(native.AUTOCONFIG.encode("utf-8"))
     evidence_root = root / "evidence"
     evidence_root.mkdir()
     preparation = {"prepared": True, "compiled": False, "target": "windows", "native_binary": native.BINARY,
@@ -363,6 +366,35 @@ class NativeSourceCandidateTests(unittest.TestCase):
         self.assertFalse(result["release_eligible"])
         self.assertEqual(result["authenticode_verification"], "not performed")
         self.assertEqual(result["files"], native.inventory(self.runtime))
+        self.assertTrue(result["startup_resources"]["exact_startup_content_verified"])
+        self.assertFalse(result["startup_resources"]["runtime_loading_verified"])
+
+    def test_rehashed_startup_resource_tampering_is_rejected(self):
+        for relative in ("privacybrowser.cfg", "distribution/privacybrowser/chrome.manifest",
+                         "defaults/pref/privacybrowser-autoconfig.js"):
+            path = self.runtime / relative
+            original = path.read_bytes()
+            with self.subTest(relative=relative):
+                path.write_bytes(original + b"\n// unexpected changed startup content\n")
+                self.refresh()
+                with self.assertRaisesRegex(ValueError, "startup resource|AutoConfig"):
+                    native.validate_candidate(self.runtime, self.evidence)
+            path.write_bytes(original)
+        self.refresh()
+
+    def test_windows_autoconfig_newlines_are_accepted_but_other_changes_rejected(self):
+        path = self.runtime / "defaults/pref/privacybrowser-autoconfig.js"
+        original = native.AUTOCONFIG.encode("utf-8")
+        path.write_bytes(original.replace(b"\n", b"\r\n"))
+        self.refresh()
+        self.assertTrue(native.validate_candidate(self.runtime, self.evidence)["startup_resources"]["exact_startup_content_verified"])
+        for changed in (original.replace(b"\n", b"\r"), original.replace(b"privacybrowser.cfg", b"different.cfg"),
+                        original * 3):
+            with self.subTest(changed=changed[:50]):
+                path.write_bytes(changed)
+                self.refresh()
+                with self.assertRaisesRegex(ValueError, "AutoConfig"):
+                    native.validate_candidate(self.runtime, self.evidence)
 
     def test_developer_overlay_and_firefox_binary_are_rejected(self):
         for name in ("firefox.exe", "nested/firefox.exe", "PRIVACY_BROWSER_BUILD.json"):

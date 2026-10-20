@@ -386,6 +386,17 @@ class NativeWorkflowTests(unittest.TestCase):
         self.assertIn('"windows-runtime-smoke.json"', inspect.getsource(workflow.stage))
         self.assertIn('"windows-installer-test.json"', inspect.getsource(workflow.stage))
 
+    def test_automatic_startup_probe_is_required_before_staging(self):
+        smoke = inspect.getsource(workflow.smoke_candidate)
+        invocation = "windows_autoconfig_smoke.run(runtime, work / \"windows-autoconfig-profile\", evidence)"
+        validation = "windows_autoconfig_smoke.validate_retained(evidence, runtime)"
+        self.assertIn(invocation, smoke)
+        self.assertLess(smoke.index("native.validate_candidate"), smoke.index(invocation))
+        self.assertLess(smoke.index(invocation), smoke.index(validation))
+        self.assertLess(smoke.index(validation), smoke.index('write_json(evidence / "windows-runtime-smoke.json"'))
+        stage = inspect.getsource(workflow.stage)
+        self.assertLess(stage.index(validation), stage.index("output.mkdir()"))
+
     def installer_report(self):
         return {"schema_version": 1, "passed": True, "installer_sha256": "a" * 64,
                 "native_binary_sha256": "b" * 64, "release_eligible": False,

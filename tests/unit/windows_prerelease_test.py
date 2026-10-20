@@ -21,6 +21,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
 import windows_prerelease as publisher
+from windows_autoconfig_smoke_test import make_retained_fixture
 
 C, R = "c" * 40, "d" * 40
 RID, NID, QID, TRIGGER, BUNDLE = 71, 72, 73, 74, 75
@@ -374,6 +375,10 @@ class PublicationTests(unittest.TestCase):
         json_file(retained / "windows-pe-hardening.json", {"schema_version": 1, "passed": True,
             "candidate_executed": False, "tool_sha256": hardening.TOOL_SHA256,
             "tool_source_revision": hardening.TOOL_SOURCE_REVISION, "binaries": hardening_records})
+        inert_runtime = self.work / "autoconfig-inert-runtime"
+        inert_runtime.mkdir()
+        (inert_runtime / "privacybrowser.exe").write_bytes(b"inert candidate executable")
+        make_retained_fixture(retained, inert_runtime)
         (root / publisher.SETUP).write_bytes(b"inert setup")
         (root / (publisher.SETUP + ".build.log")).write_text("inert NSIS log")
         (retained / "xpcshell.log").write_bytes(b"inert xpcshell success assertion")
@@ -406,6 +411,8 @@ class PublicationTests(unittest.TestCase):
             commands.append({"argv": argv, "exit_code": 0, "log": {"path": label + ".log", "sha256": publisher.native.digest(retained / (label + ".log"))}})
         json_file(retained / "windows-runtime-smoke.json", {"schema_version": 1, "windows_smoke_checks_passed": True,
             "native_binary_sha256": binary_hash, "release_eligible": False, "interactive_windows_ui_tested": False,
+            "autoconfig_runtime": {"path": publisher.windows_autoconfig_smoke.REPORT,
+                                   "sha256": publisher.native.digest(retained / publisher.windows_autoconfig_smoke.REPORT)},
             "privacy_security_acceptance_tested": False, "commands": commands, "screenshots": screenshots})
         self.request["custom_home_review"]["screenshot_sha256"] = screenshots[1]["sha256"]
         json_file(self.repo / publisher.REQUEST, self.request)
@@ -439,6 +446,25 @@ class PublicationTests(unittest.TestCase):
                         archive.extractall(unpacked)
                 with self.assertRaisesRegex(ValueError, key):
                     publisher.validate_payload(root, self.request)
+
+    def test_false_automatic_startup_blocks_even_with_rehashed_positive_summaries(self):
+        root, binary_hash = self.payload_fixture()
+        probe = publisher.windows_autoconfig_smoke
+        retained = root / "evidence"
+        observation = json.loads((retained / probe.OBSERVATION).read_text(encoding="utf-8"))
+        observation["startup"]["glue"]["started"] = False
+        json_file(retained / probe.OBSERVATION, observation)
+        report = json.loads((retained / probe.REPORT).read_text(encoding="utf-8"))
+        report["records"]["observation"]["sha256"] = publisher.native.digest(retained / probe.OBSERVATION)
+        json_file(retained / probe.REPORT, report)
+        smoke = json.loads((retained / "windows-runtime-smoke.json").read_text(encoding="utf-8"))
+        smoke["autoconfig_runtime"]["sha256"] = publisher.native.digest(retained / probe.REPORT)
+        json_file(retained / "windows-runtime-smoke.json", smoke)
+        sums(root)
+        with mock.patch.object(publisher.native, "validate_candidate", return_value={"native_binary_sha256": binary_hash}), \
+             mock.patch.object(publisher.native, "validate_installer"), \
+             self.assertRaisesRegex(ValueError, "Automatic-startup"):
+            publisher.validate_payload(root, self.request)
 
     def test_source_commit_and_xpcshell_log_tampering_fail_before_pe_inspection(self):
         root, _ = self.payload_fixture()

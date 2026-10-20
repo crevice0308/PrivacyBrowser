@@ -24,6 +24,7 @@ import urllib.request
 import zipfile
 
 import verify_windows_native as native
+import windows_autoconfig_smoke
 
 ROOT = Path(__file__).resolve().parents[1]
 SETUP_NAME = "PrivacyBrowser-0.1.0-dev-win64-setup-UNSIGNED.exe"
@@ -272,6 +273,10 @@ def smoke_candidate(work: Path) -> None:
     version_text = (evidence / "windows-version.log").read_text(encoding="utf-8", errors="replace").split("\n", 1)[1]
     native.require("PrivacyBrowser" in version_text and upstream.removesuffix("esr") in version_text
                    and "Firefox" not in version_text, "Native --version output has wrong identity/version")
+    # Observe automatic startup in a separate fresh profile. The probe must not
+    # initialize the overlay itself or replace the product's privacy defaults.
+    windows_autoconfig_smoke.run(runtime, work / "windows-autoconfig-profile", evidence)
+    windows_autoconfig_smoke.validate_retained(evidence, runtime)
     screenshots = []
     local_page = evidence / "rendering-smoke.html"
     local_page.write_text('<!doctype html><meta charset="utf-8"><title>PrivacyBrowser native smoke</title>'
@@ -296,11 +301,14 @@ def smoke_candidate(work: Path) -> None:
     write_json(evidence / "windows-runtime-smoke.json", {
         "schema_version": 1, "windows_smoke_checks_passed": True,
         "native_binary_sha256": proof["files"]["privacybrowser.exe"], "commands": results,
-        "screenshots": screenshots, "tested": ["version identity", "local HTML headless rendering", "custom chrome home screenshot capture only"],
-        "custom_home_content_verified": False,
+        "autoconfig_runtime": record_file(evidence, evidence / "windows-autoconfig-smoke.json"),
+        "screenshots": screenshots, "tested": ["version identity", "local HTML headless rendering",
+                                                "automatic overlay startup and bounded privacy/default invariants",
+                                                "custom chrome home readiness and separate screenshot capture"],
+        "custom_home_content_verified": True,
         "interactive_windows_ui_tested": False, "install_uninstall_tested": False,
         "privacy_security_acceptance_tested": False, "release_eligible": False,
-        "limitation": "The custom home screenshot needs visual review; an image alone does not prove its content loaded. Smoke tests do not validate normal browsing, Explorer display, installer behavior, persistence, privacy or security requirements."})
+        "limitation": "The separate custom home screenshot still needs visual review. Bounded startup observations do not validate normal browsing, Explorer display, installer behavior, persistence or complete privacy/security acceptance."})
 
 
 def validate_installer_test(report: dict, installer_sha256: str, native_binary_sha256: str) -> None:
@@ -323,6 +331,7 @@ def stage(work: Path) -> None:
     proof = evidence / "build-evidence.json"
     native.validate_candidate(runtime, proof)
     windows_pe_hardening.validate_retained(evidence, runtime)
+    windows_autoconfig_smoke.validate_retained(evidence, runtime)
     smoke = native.load_json(evidence / "windows-runtime-smoke.json")
     native.require(smoke.get("windows_smoke_checks_passed") is True and
                    smoke.get("native_binary_sha256") == native.digest(runtime / "privacybrowser.exe"), "Missing matching passed Windows smoke tests")
@@ -347,7 +356,8 @@ def stage(work: Path) -> None:
     (output / "UNPUBLISHED-CANDIDATE.txt").write_text(
         "PrivacyBrowser unsigned, unpublished full-source Windows candidate.\n"
         "Native PE identity/icons, build/package logs, a Places xpcshell smoke test, "
-        "--version, local headless rendering and bounded per-user install/uninstall "
+        "--version, automatic overlay startup, bounded privacy/default invariants, "
+        "local headless rendering and bounded per-user install/uninstall "
         "checks passed in the workflow. The custom-home screenshot still needs visual review.\n"
         "Interactive UI, Explorer display, broader "
         "privacy/security acceptance and independent signing remain unverified.\n"
