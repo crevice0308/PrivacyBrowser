@@ -41,6 +41,27 @@ run_logged() {
     return "${statuses[1]}"
 }
 
+# Genuine Places execution is called separately only after the real installer
+# has created and verified owned Windows data roots. Its crash helper uses the
+# actual Windows profile folder regardless of Gecko's data-directory overrides.
+case "${1:-}" in
+    --places-smoke)
+        for record in xpcshell.log xpcshell-exit.json windows-places-smoke.json; do
+            if [[ -e "$evidence/$record" || -L "$evidence/$record" ]]; then
+                printf '%s\n' 'Places evidence already exists; refusing to overwrite' >&2
+                exit 2
+            fi
+        done
+        export RUSTC="$work_windows/rust-toolchain/rustc/bin/rustc.exe"
+        export CARGO="$work_windows/rust-toolchain/rustc/bin/cargo.exe"
+        export WINCHECKSEC="$work_windows/mozbuild/winchecksec/winchecksec.exe"
+        run_logged xpcshell ./mach xpcshell-test toolkit/components/places/tests/unit/test_isURIVisited.js
+        exit 0
+        ;;
+    "") ;;
+    *) printf '%s\n' 'Unsupported native build mode' >&2; exit 2 ;;
+esac
+
 # Preserve the exact submitted mozconfig so bootstrap cannot silently change
 # branding, object-directory placement, or turn this into an artifact build.
 cp mozconfig "$evidence/mozconfig.before-bootstrap"
@@ -85,10 +106,12 @@ export WINCHECKSEC="$work_windows/mozbuild/winchecksec/winchecksec.exe"
 printf '%s\n' '{"schema_version":1,"source_kind":"verified-source-archive","mozilla_ci_mode":false,"warnings_as_errors":true,"winchecksec_required":true,"pdbstr_policy":"upstream optional source-indexing tool; detection recorded in configure output","source_indexed_pdbs_claimed":false}' > "$evidence/source-archive-build-policy.json"
 
 # These are genuine full C++/Rust/Gecko compilation and packaging commands.
+python3 "$script_dir/windows_test_roots.py" --phase before-build
 run_logged build ./mach build
+python3 "$script_dir/windows_test_roots.py" --phase before-package
 run_logged package ./mach package
-run_logged xpcshell ./mach xpcshell-test toolkit/components/places/tests/unit/test_isURIVisited.js
+python3 "$script_dir/windows_test_roots.py" --phase after-package
 
-# This marker is created only after all three commands exit successfully;
-# evidence generation requires it and hashes the separate retained logs.
-printf '%s\n' '{"schema_version":1,"commands":[{"argv":["./mach","build"],"exit_code":0},{"argv":["./mach","package"],"exit_code":0},{"argv":["./mach","xpcshell-test","toolkit/components/places/tests/unit/test_isURIVisited.js"],"exit_code":0}]}' > "$evidence/commands.json"
+# Build/package proof is immutable before installer creation. Places is NOT
+# asserted here: its later raw log/exit record is a separate mandatory gate.
+printf '%s\n' '{"schema_version":1,"commands":[{"argv":["./mach","build"],"exit_code":0},{"argv":["./mach","package"],"exit_code":0}]}' > "$evidence/commands.json"

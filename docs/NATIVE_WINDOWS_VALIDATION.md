@@ -166,6 +166,31 @@ real profile paths, browser startup and publication are excluded from that
 fixture. Its evidence is separate from the later genuine-browser installer and
 runtime results; a fixture pass alone cannot qualify a candidate.
 
+Read-only root checks run before build tooling, around native build/package, around the fast synthetic tests, and immediately before genuine
+installation. Their bounded JSON records use fixed target labels and existence/
+type facts, not user paths, profile contents, or registry values. Any existing
+product root, link/reparse entry or inspection error still refuses the test;
+the workflow never deletes or adopts an unknown root to make the test pass.
+
+The genuine Places xpcshell test runs only after the real installer creates and
+verifies previously absent owned data roots. The pinned upstream crash helper
+uses the Windows profile known folder to create
+`AppData/Roaming/PrivacyBrowser/PrivacyBrowser/Crash Reports`, ignoring Gecko
+app-data overrides. This is inside the newly owned roaming root and remains
+covered by complete-uninstall verification. A read-only known-folder comparison
+also requires the profile-derived literal roaming path to match the actual shell
+roaming folder, refusing redirected/reparse layouts instead of writing outside
+the owned root. No crash reporting, sandbox feature,
+or Windows known-folder setting is disabled or redirected. The earlier generic
+refusal did not retain direct filesystem proof of the creator; the pinned source
+provides the causal path, and new phase records distinguish earlier side effects.
+
+Build/package evidence remains immutable before installer compilation. Places
+has a separate mandatory raw log/exit record and report bound to the exact build
+manifest, source commit/run and native binary. Runtime smoke, artifact staging
+and prerelease validation all require it. Missing, failed or mismatched Places
+evidence cannot be replaced with a successful build/package assertion.
+
 `test_native_installer.ps1` is restricted to a fresh directory on an ephemeral
 GitHub-hosted runner. It checks all installed payload hashes, native metadata,
 per-user shortcuts and uninstall registration. A locked executable and a real

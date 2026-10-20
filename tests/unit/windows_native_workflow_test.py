@@ -3,6 +3,9 @@ from pathlib import Path
 import io
 import inspect
 import json
+import os
+import shutil
+import subprocess
 import re
 import stat
 import sys
@@ -17,6 +20,83 @@ import windows_native_evidence as workflow
 
 
 class NativeWorkflowTests(unittest.TestCase):
+    def test_actual_roots_stay_guarded_and_places_waits_for_installer_ownership(self):
+        shell = (ROOT / "tools/build_windows_native.sh").read_text()
+        powershell = (ROOT / "tools/build_windows_native.ps1").read_text()
+        installer = (ROOT / "tools/test_native_installer.ps1").read_text()
+        import windows_autoconfig_smoke
+        for name in ("MOZ_APP_DATA", "MOZ_LOCAL_APP_DATA"):
+            self.assertNotIn("export " + name + "=", shell)
+            self.assertNotIn("$env:" + name + " =", powershell + installer)
+            self.assertIn(name, windows_autoconfig_smoke.FORBIDDEN_ENV)
+        self.assertLess(powershell.index("'--phase', 'initial'"), powershell.index("Invoke-WebRequest"))
+        for phase, command in (("before-build", "build"), ("before-package", "package")):
+            self.assertLess(shell.index("--phase " + phase), shell.index("run_logged " + command + " ./mach"))
+        self.assertLess(shell.index("run_logged package ./mach"), shell.index("--phase after-package"))
+        self.assertIn("'windows_test_roots.py') --phase 'before-installer'", installer)
+        self.assertIn("A pre-existing PrivacyBrowser profile, shortcut or uninstall entry prevents this isolated test.", installer)
+        self.assertLess(installer.index("--phase 'before-installer'"), installer.index("$exitCode = Run-Bounded $Installer"))
+        places = installer.index("$placesExit = Run-Bounded")
+        for check in ("unicode_owned_root_markers", "exact_payload_hashes", "native_shortcuts", "per_user_registration"):
+            self.assertLess(installer.index("$checks." + check + " = $true"), places)
+        self.assertLess(places, installer.index("'windows_places_smoke.py')"))
+        self.assertLess(installer.index("$checks.places_xpcshell_completed = $true"), installer.index("'windows_native_evidence.py')"))
+        self.assertIn("'D:\\pb\\run-places-smoke.cmd') 600", installer)
+        self.assertIn("--places-smoke", powershell)
+        branch = shell[shell.index('case "${1:-}" in'):shell.index("# Preserve the exact")]
+        self.assertIn("run_logged xpcshell ./mach xpcshell-test", branch)
+        self.assertIn("exit 0", branch)
+        self.assertNotIn("run_logged xpcshell", shell[shell.index("# Preserve the exact"):])
+        self.assertNotIn('"xpcshell-test"', shell[shell.index("# Build/package proof"):])
+
+    def test_places_evidence_is_required_by_runtime_stage_and_publication(self):
+        import windows_prerelease
+        for function in (workflow.smoke_candidate, workflow.stage, windows_prerelease.validate_payload):
+            source = inspect.getsource(function)
+            self.assertIn("windows_places_smoke.validate_retained", source)
+        self.assertLess(inspect.getsource(workflow.smoke_candidate).index("windows_places_smoke.validate_retained"),
+                        inspect.getsource(workflow.smoke_candidate).index("results = [run_smoke"))
+        self.assertLess(inspect.getsource(workflow.stage).index("windows_places_smoke.validate_retained"),
+                        inspect.getsource(workflow.stage).index("output.mkdir()"))
+
+    @unittest.skipUnless(sys.platform == "linux" and shutil.which("bash"), "Inert POSIX shell-mode exercise")
+    def test_places_shell_mode_runs_only_one_inert_test_and_never_overwrites(self):
+        script = ROOT / "tools/build_windows_native.sh"
+        for code, existing in ((0, False), (7, False), (0, True)):
+            with self.subTest(code=code, existing=existing):
+                work = self.root / f"inert-{code}-{existing}"
+                for name in ("source", "evidence", "bin", "tmp"):
+                    (work / name).mkdir(parents=True)
+                converter = work / "bin/cygpath"
+                converter.write_text('#!/bin/sh\n[ "$1" = -m ] || exit 91\nprintf "%s\\n" "$2"\n')
+                converter.chmod(0o700)
+                mach = work / "source/mach"
+                mach.write_text('#!/bin/sh\n[ "$1" = xpcshell-test ] || exit 92\n'
+                                '[ "$2" = toolkit/components/places/tests/unit/test_isURIVisited.js ] || exit 93\n'
+                                'printf "INERT self-authored shell fixture\\n"\n'
+                                'printf "called" > ../called\n' + f'exit {code}\n')
+                mach.chmod(0o700)
+                log = work / "evidence/xpcshell.log"
+                if existing:
+                    log.write_bytes(b"retain existing inert evidence")
+                environment = dict(os.environ, PB_WORK_UNIX=str(work),
+                                   PATH=str(work / "bin") + os.pathsep + os.environ.get("PATH", ""))
+                environment.pop("PB_RUST_TASK", None)
+                environment.pop("PB_RUST_VERSION", None)
+                result = subprocess.run([shutil.which("bash"), str(script), "--places-smoke"],
+                                        env=environment, capture_output=True, timeout=20)
+                self.assertEqual(result.returncode, 2 if existing else code, result.stderr.decode())
+                self.assertFalse((work / "evidence/commands.json").exists())
+                self.assertFalse((work / "evidence/mozconfig.before-bootstrap").exists())
+                if existing:
+                    self.assertFalse((work / "called").exists())
+                    self.assertEqual(log.read_bytes(), b"retain existing inert evidence")
+                else:
+                    self.assertTrue((work / "called").exists())
+                    self.assertEqual(json.loads((work / "evidence/xpcshell-exit.json").read_text()),
+                                     {"schema_version": 1, "phase": "xpcshell",
+                                      "command_exit_code": code, "tee_exit_code": 0})
+
     def test_quality_pip_command_uses_yaml_block_scalar(self):
         # A plain YAML scalar cannot contain the colon-space in :all: followed
         # by another option. Keep the hash-pinned command in a literal block.
@@ -312,11 +392,10 @@ class NativeWorkflowTests(unittest.TestCase):
     def test_candidate_preparation_never_starts_native_program(self):
         evidence = self.root / "evidence"
         evidence.mkdir()
-        commands = [["./mach", "build"], ["./mach", "package"],
-                    ["./mach", "xpcshell-test", "toolkit/components/places/tests/unit/test_isURIVisited.js"]]
+        commands = [["./mach", "build"], ["./mach", "package"]]
         workflow.write_json(evidence / "commands.json", {
             "commands": [{"argv": argv, "exit_code": 0} for argv in commands]})
-        for name in ("source-preparation.json", "source-verification.json", "build.log", "package.log", "xpcshell.log"):
+        for name in ("source-preparation.json", "source-verification.json", "build.log", "package.log"):
             (evidence / name).write_text("inert test evidence")
         dist = self.root / "source/obj-privacybrowser/dist"
         dist.mkdir(parents=True)
@@ -333,6 +412,8 @@ class NativeWorkflowTests(unittest.TestCase):
             validate.assert_called_once()
             smoke.assert_not_called()
         self.assertTrue((evidence / "build-evidence.json").is_file())
+        self.assertFalse((evidence / "xpcshell.log").exists())
+        self.assertNotIn("xpcshell_log", json.loads((evidence / "build-evidence.json").read_text()))
         self.assertTrue((evidence / "native-static-checks.json").is_file())
         self.assertFalse((evidence / "windows-runtime-smoke.json").exists())
         runtime = self.root / "candidate/PrivacyBrowser"

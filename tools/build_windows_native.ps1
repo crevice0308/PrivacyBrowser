@@ -85,6 +85,10 @@ function Invoke-Python([string[]] $Arguments) {
     if ($LASTEXITCODE -ne 0) { throw "Python step failed: $($Arguments[0])" }
 }
 
+# Refuse existing product data before any build/test tool can create side effects.
+# Retain only phase-labelled presence/type facts, never the data or user paths.
+Invoke-Python @((Join-Path $Repo 'tools\windows_test_roots.py'), '--phase', 'initial')
+
 # The exact approved release is downloaded as data, then independently checked
 # for immutable content, OS-verified Authenticode, and the expected signer.
 $Installer = Join-Path $Work 'downloads\MozillaBuildSetup-4.2.1.exe'
@@ -245,6 +249,14 @@ $Launch = Join-Path $Work 'run-mozilla-build.cmd'
 call "$MozillaBuild\start-shell.bat" -c "bash '$RepoUnix/tools/build_windows_native.sh'"
 exit /b %ERRORLEVEL%
 "@ | Set-Content $Launch -Encoding ascii
+# This callback is invoked only after genuine installation verifies fresh owned
+# profile roots. It reuses the same source build; it does not bootstrap/rebuild.
+$PlacesLaunch = Join-Path $Work 'run-places-smoke.cmd'
+@"
+@echo off
+call "$MozillaBuild\start-shell.bat" -c "bash '$RepoUnix/tools/build_windows_native.sh' --places-smoke"
+exit /b %ERRORLEVEL%
+"@ | Set-Content $PlacesLaunch -Encoding ascii
 Write-MemorySnapshot 'before-shell'
 & cmd.exe /d /c $Launch
 $ShellExitCode = $LASTEXITCODE

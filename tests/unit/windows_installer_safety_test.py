@@ -23,6 +23,7 @@ class FastInstallerSafetyTests(unittest.TestCase):
         self.work = self.root / "pb"
         self.identity = {"source_commit": "a" * 40, "quality_run_id": "123", "workflow_run_id": "456",
                          "workflow_run_attempt": "1", "repository": "test/repo"}
+        self.root_check = self.enterContext(mock.patch.object(fast.windows_test_roots, "check"))
 
     def test_main_refuses_nonhosted_execution_before_source_or_files(self):
         with mock.patch.dict(os.environ, {"GITHUB_ACTIONS": "false", "RUNNER_ENVIRONMENT": "local"}), \
@@ -105,6 +106,7 @@ class FastInstallerSafetyTests(unittest.TestCase):
 
     def test_fast_run_orders_phases_and_retains_truthful_commit_bound_success(self):
         calls = []
+        self.root_check.side_effect = lambda work, phase: calls.append(phase)
         compiler = self.work / fast.syntax.COMPILER_RELATIVE
         execution = {"passed": True, "synthetic_fixture_executed": True,
                      "production_syntax_installer_executed": False, "browser_executed": False, "release_eligible": False}
@@ -121,7 +123,8 @@ class FastInstallerSafetyTests(unittest.TestCase):
             report = fast.run_preflight(self.work, self.identity)
             self.assertEqual(os.environ["TEMP"], "unchanged-temp")
             self.assertEqual(os.environ["TMP"], "unchanged-tmp")
-        self.assertEqual(calls, ["provision", "production-compile-only", "synthetic-compile", "synthetic-only-execution"])
+        self.assertEqual(calls, ["fast-before", "provision", "production-compile-only", "synthetic-compile",
+                                 "synthetic-only-execution", "fast-after"])
         self.assertTrue(report["passed"])
         self.assertEqual(report["source_commit"], "a" * 40)
         self.assertFalse(report["gecko_downloaded"])
@@ -129,6 +132,15 @@ class FastInstallerSafetyTests(unittest.TestCase):
         self.assertFalse(report["release_eligible"])
         self.assertFalse((self.work / "artifact").exists())
         self.assertEqual(json.loads((self.work / "evidence/installer-safety-preflight.json").read_text()), report)
+
+    def test_existing_product_roots_stop_before_provisioning_and_are_not_removed(self):
+        self.root_check.side_effect = ValueError("Product root is present")
+        with mock.patch.object(fast, "provision_fixture_nsis") as provision, self.assertRaises(ValueError):
+            fast.run_preflight(self.work, self.identity)
+        provision.assert_not_called()
+        self.root_check.assert_called_once_with(self.work, "fast-before")
+        report = json.loads((self.work / "evidence/installer-safety-preflight.json").read_text())
+        self.assertFalse(report["passed"])
 
     def test_failure_blocks_remaining_phases_and_retains_failed_bound_report(self):
         with mock.patch.object(fast, "provision_fixture_nsis", side_effect=ValueError("fixture integrity mismatch")), \

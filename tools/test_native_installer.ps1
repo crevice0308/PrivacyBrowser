@@ -72,6 +72,11 @@ Assert-True ($proof.sha256 -ceq $installerHash -and $proof.native_binary_sha256 
 Assert-True ($proof.build_kind -ceq 'full-source-build-candidate-installer' -and $proof.installer_compiled -eq $true -and $proof.release_eligible -eq $false) 'A validated source-build candidate is required.'
 Assert-True ($proof.installer_static_validation.installer_static_identity_passed -eq $true) 'Static native installer identity validation is required.'
 
+# Keep the existing guard below; this shared read-only check adds target-labelled
+# failure evidence and also rejects reparse entries and inherited test overrides.
+& python (Join-Path $PSScriptRoot 'windows_test_roots.py') --phase 'before-installer'
+Assert-True ($LASTEXITCODE -eq 0) 'Fresh product-root checks failed; inspect windows-test-roots-before-installer.json.'
+
 # Exercise Unicode path round-tripping in ownership markers and native startup.
 $installDir = Join-Path $WorkRoot 'PrivacyBrowser-日本語'
 $exe = Join-Path $installDir 'privacybrowser.exe'
@@ -172,6 +177,14 @@ $checks.native_shortcuts = $true
 $entry = Get-ItemProperty -LiteralPath $registry
 Assert-True ($entry.DisplayName -ceq 'PrivacyBrowser' -and $entry.InstallLocation -ieq $installDir -and $entry.UninstallString -ceq ('"' + $uninstaller + '"')) 'The per-user uninstall registration is invalid.'
 $checks.per_user_registration = $true
+# Xpcshell's crash helper also uses the actual roaming profile folder. Run the
+# genuine Places test only now: both roots were absent, then created by this
+# installer, and their exact ownership/payload/registration were verified above.
+$placesExit = Run-Bounded 'cmd.exe' @('/d', '/c', 'D:\pb\run-places-smoke.cmd') 600
+Assert-True ($placesExit -eq 0) 'The genuine Places xpcshell test failed.'
+& python (Join-Path $PSScriptRoot 'windows_places_smoke.py') --work-root 'D:\pb'
+Assert-True ($LASTEXITCODE -eq 0) 'Matching retained Places test evidence is required.'
+$checks.places_xpcshell_completed = $true
 # Gecko's launcher can write a blocklist beneath its known RoamingAppData root,
 # even with --profile. Establish installer ownership before native runtime smoke.
 & python (Join-Path $PSScriptRoot 'windows_native_evidence.py') --work-root 'D:\pb' --smoke

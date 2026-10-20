@@ -25,6 +25,7 @@ import zipfile
 
 import verify_windows_native as native
 import windows_autoconfig_smoke
+import windows_places_smoke
 
 ROOT = Path(__file__).resolve().parents[1]
 SETUP_NAME = "PrivacyBrowser-0.1.0-dev-win64-setup-UNSIGNED.exe"
@@ -32,6 +33,7 @@ NSIS_URL = "https://github.com/mozilla-releng/adhoc-signing-blobs/raw/nsis/nsis-
 NSIS_SHA256 = "5856cd49b52870caa41814d71ce30c4304d5001b80c04f4eb7028ffedd91df7e"
 NSIS_BYTES = 2618390
 REQUIRED_INSTALLER_CHECKS = (
+    "places_xpcshell_completed",
     "default_silent_retains_user_data",
     "reinstall_preserves_owned_profile",
     "ownership_marker_purge_refused",
@@ -198,9 +200,8 @@ def prepare_candidate(work: Path) -> None:
     upstream = config["upstream_version"]
     evidence = work / "evidence"
     commands = native.load_json(evidence / "commands.json")
-    expected = [["./mach", "build"], ["./mach", "package"],
-                ["./mach", "xpcshell-test", "toolkit/components/places/tests/unit/test_isURIVisited.js"]]
-    native.require(commands.get("commands") == [{"argv": argv, "exit_code": 0} for argv in expected], "Missing successful native build/package/test result")
+    expected = [["./mach", "build"], ["./mach", "package"]]
+    native.require(commands.get("commands") == [{"argv": argv, "exit_code": 0} for argv in expected], "Missing successful native build/package result")
     packages = sorted((work / "source/obj-privacybrowser/dist").glob("*.zip"))
     # Reject tests/symbol archives and require one real new packaged application.
     candidates = []
@@ -241,8 +242,7 @@ def prepare_candidate(work: Path) -> None:
              "preparation": record_file(evidence, evidence / "source-preparation.json"),
              "source_verification": record_file(evidence, evidence / "source-verification.json"),
              "build_log": record_file(evidence, evidence / "build.log"),
-             "package_log": record_file(evidence, evidence / "package.log"),
-             "xpcshell_log": record_file(evidence, evidence / "xpcshell.log")}
+             "package_log": record_file(evidence, evidence / "package.log")}
     build_evidence = evidence / "build-evidence.json"
     write_json(build_evidence, proof)
     report = native.validate_candidate(runtime, build_evidence)
@@ -262,6 +262,7 @@ def smoke_candidate(work: Path) -> None:
     proof = native.load_json(build_evidence)
     native.validate_candidate(runtime, build_evidence)
     windows_pe_hardening.validate_retained(evidence, runtime)
+    windows_places_smoke.validate_retained(evidence, runtime)
     static = native.load_json(evidence / "native-static-checks.json")
     native.require(static.get("static_candidate_checks_passed") is True
                    and static.get("native_binary_sha256") == proof["files"]["privacybrowser.exe"],
@@ -331,6 +332,7 @@ def stage(work: Path) -> None:
     proof = evidence / "build-evidence.json"
     native.validate_candidate(runtime, proof)
     windows_pe_hardening.validate_retained(evidence, runtime)
+    windows_places_smoke.validate_retained(evidence, runtime)
     windows_autoconfig_smoke.validate_retained(evidence, runtime)
     smoke = native.load_json(evidence / "windows-runtime-smoke.json")
     native.require(smoke.get("windows_smoke_checks_passed") is True and

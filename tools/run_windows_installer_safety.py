@@ -17,6 +17,7 @@ import subprocess
 import check_native_installer_syntax as syntax
 import test_native_installer_synthetic as synthetic
 import verify_windows_native as native
+import windows_test_roots
 from windows_native_evidence import NSIS_BYTES, NSIS_SHA256, NSIS_URL, download_nsis, safe_extract_zip, write_json
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -87,6 +88,7 @@ def run_preflight(work: Path, identity: dict) -> dict:
     previous = {key: os.environ.get(key) for key in ("TEMP", "TMP")}
     os.environ.update(TEMP=str(work / "tmp"), TMP=str(work / "tmp"))
     try:
+        windows_test_roots.check(work, "fast-before")
         compiler = provision_fixture_nsis(work, identity["source_commit"])
         syntax.compile_syntax(work, compiler)
         compilation = syntax.compile_synthetic(work, compiler)
@@ -95,6 +97,7 @@ def run_preflight(work: Path, identity: dict) -> dict:
                        and execution.get("production_syntax_installer_executed") is False
                        and execution.get("browser_executed") is False and execution.get("release_eligible") is False,
                        "Synthetic safety checks did not complete successfully")
+        windows_test_roots.check(work, "fast-after")
         report["passed"] = True
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         report["error_type"] = type(error).__name__

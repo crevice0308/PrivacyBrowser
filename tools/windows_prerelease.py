@@ -26,6 +26,7 @@ import verify_windows_native as native
 import windows_native_evidence as evidence
 import windows_pe_hardening
 import windows_autoconfig_smoke
+import windows_places_smoke
 
 ROOT = Path(__file__).resolve().parents[1]
 REPO = "crevice0308/PrivacyBrowser"
@@ -38,8 +39,7 @@ SHA = re.compile(r"[a-f0-9]{40}\Z")
 HASH = re.compile(r"[a-f0-9]{64}\Z")
 MAX_ARCHIVE = 4 * 1024**3
 EXPECTED_COMMANDS = [{"argv": argv, "exit_code": 0} for argv in (
-    ["./mach", "build"], ["./mach", "package"],
-    ["./mach", "xpcshell-test", "toolkit/components/places/tests/unit/test_isURIVisited.js"])]
+    ["./mach", "build"], ["./mach", "package"])]
 
 
 def require(value, message):
@@ -256,12 +256,12 @@ def validate_payload(root, request):
             and all(type(command.get("exit_code")) is int for command in source["commands"]),
             "Source commit/run/command evidence mismatch")
     require(native.load_json(root / "evidence/commands.json").get("commands") == EXPECTED_COMMANDS,
-            "Missing genuine native build/package/xpcshell results")
-    retained_record(root / "evidence", source.get("xpcshell_log"), "xpcshell.log")
+            "Missing genuine native build/package results")
     unpacked = root.parent / "runtime-unpacked"
     evidence.safe_extract_zip(root / PORTABLE, unpacked)
     require(sorted(path.name for path in unpacked.iterdir()) == ["PrivacyBrowser"], "Unexpected runtime ZIP layout")
     runtime = unpacked / "PrivacyBrowser"
+    windows_places_smoke.validate_retained(root / "evidence", runtime)
     report = native.validate_candidate(runtime, root / "evidence/build-evidence.json")
     windows_pe_hardening.validate_retained(root / "evidence", runtime)
     windows_autoconfig_smoke.validate_retained(root / "evidence", runtime)

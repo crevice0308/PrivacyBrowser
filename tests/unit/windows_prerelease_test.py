@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
 import windows_prerelease as publisher
 from windows_autoconfig_smoke_test import make_retained_fixture
+from windows_places_smoke_test import make_retained_fixture as make_places_fixture
 
 C, R = "c" * 40, "d" * 40
 RID, NID, QID, TRIGGER, BUNDLE = 71, 72, 73, 74, 75
@@ -381,11 +382,13 @@ class PublicationTests(unittest.TestCase):
         make_retained_fixture(retained, inert_runtime)
         (root / publisher.SETUP).write_bytes(b"inert setup")
         (root / (publisher.SETUP + ".build.log")).write_text("inert NSIS log")
-        (retained / "xpcshell.log").write_bytes(b"inert xpcshell success assertion")
-        proof = {"commit": C, "workflow_run": f"https://github.com/{publisher.REPO}/actions/runs/{NID}",
-                 "commands": publisher.EXPECTED_COMMANDS,
-                 "xpcshell_log": {"path": "xpcshell.log", "sha256": publisher.native.digest(retained / "xpcshell.log")}}
+        proof = {"schema_version": 1, "build_kind": "full-source-build", "source_compiled": True,
+                 "official_release": False, "target": "windows", "native_binary": "privacybrowser.exe",
+                 "files": {"privacybrowser.exe": binary_hash},
+                 "commit": C, "workflow_run": f"https://github.com/{publisher.REPO}/actions/runs/{NID}",
+                 "commands": publisher.EXPECTED_COMMANDS}
         json_file(retained / "build-evidence.json", proof)
+        make_places_fixture(retained, inert_runtime)
         json_file(retained / "commands.json", {"commands": publisher.EXPECTED_COMMANDS})
         json_file(retained / "native-static-checks.json", {"static_candidate_checks_passed": True, "native_binary_sha256": binary_hash})
         json_file(root / (publisher.SETUP + ".json"), {"schema_version": 1, "build_kind": "full-source-build-candidate-installer",
@@ -475,7 +478,7 @@ class PublicationTests(unittest.TestCase):
             if mutation == "commit":
                 changed["commit"] = R
             else:
-                changed["xpcshell_log"]["sha256"] = "e" * 64
+                (root / "evidence/xpcshell.log").write_bytes(b"INERT tampered failed test")
             json_file(proof_path, changed)
             sums(root)
             with self.subTest(mutation=mutation), mock.patch.object(publisher.native, "validate_candidate") as native_check:
