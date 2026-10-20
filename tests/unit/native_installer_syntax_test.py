@@ -11,6 +11,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
 import check_native_installer_syntax as syntax
+from native_package_test import pe_fixture, resources_fixture
 
 
 class NativeInstallerSyntaxTests(unittest.TestCase):
@@ -38,9 +39,12 @@ class NativeInstallerSyntaxTests(unittest.TestCase):
         self.assertEqual(kwargs["env"]["NSISDIR"], str(self.work / syntax.NSIS_DIRECTORY))
         output_argument = next(value for value in command if "DOUTPUT_FILE=" in value)
         output = Path(output_argument.split("=", 1)[1])
-        self.assertEqual(output.parent, self.work / "installer-syntax")
-        self.assertEqual(output.name, "DO-NOT-RUN-inert-installer-syntax.exe")
-        output.write_bytes(b"MZinert mocked output; no executable code")
+        self.assertEqual(output.parent, self.work / "installer-syntax/DO-NOT-RUN-inert-installer-syntax")
+        self.assertEqual(output.name, syntax.native.SETUP_NAME)
+        fields = {"ProductName": "PrivacyBrowser Setup", "FileDescription": "PrivacyBrowser Installer",
+                  "InternalName": "PrivacyBrowser Setup", "OriginalFilename": syntax.native.SETUP_NAME,
+                  "CompanyName": "PrivacyBrowser contributors", "FileVersion": "0.1.0-dev", "ProductVersion": "0.1.0-dev"}
+        output.write_bytes(pe_fixture(resources_fixture(fields, engine="0.1.0", structure_version=0), machine=0x14C))
         kwargs["stdout"].write("Mocked compiler success, not an actual compilation.\n")
         return subprocess.CompletedProcess(command, 0)
 
@@ -52,6 +56,9 @@ class NativeInstallerSyntaxTests(unittest.TestCase):
             report = syntax.compile_syntax(self.work, self.compiler)
         run.assert_called_once()
         self.assertTrue(report["syntax_compiled"])
+        self.assertTrue(report["installer_static_identity_passed"])
+        self.assertTrue(report["installer_static_validation"]["installer_static_identity_passed"])
+        self.assertEqual(report["installer_static_validation"]["sha256"], report["generated_installer_sha256"])
         self.assertFalse(report["generated_installer_executed"])
         self.assertFalse(report["generated_installer_uploaded"])
         self.assertFalse(report["browser_compiled"])
@@ -66,6 +73,49 @@ class NativeInstallerSyntaxTests(unittest.TestCase):
         self.assertFalse((self.work / "artifact").exists())
         self.assertEqual(list((self.work / "evidence").glob("*.exe")), [])
         self.assertEqual(self.report()["generated_installer_sha256"], report["generated_installer_sha256"])
+
+    def test_compiler_success_with_bad_wrapper_is_retained_and_blocks_synthetic_execution(self):
+        def wrong_wrapper(command, **kwargs):
+            result = self.fake_compile(command, **kwargs)
+            output = Path(next(value.split("=", 1)[1] for value in command if "DOUTPUT_FILE=" in value))
+            data = output.read_bytes().replace("PrivacyBrowser Setup".encode("utf-16le"),
+                                             "AnotherBrowser Setup".encode("utf-16le"))
+            output.write_bytes(data)
+            return result
+        with mock.patch.object(syntax.subprocess, "run", side_effect=wrong_wrapper), \
+             self.assertRaisesRegex(ValueError, "static identity preflight"):
+            syntax.compile_syntax(self.work, self.compiler)
+        report = self.report()
+        self.assertTrue(report["syntax_compiled"])
+        self.assertFalse(report["installer_static_identity_passed"])
+        self.assertIn("Unexpected installer native ProductName", report["installer_static_validation_error"])
+        self.assertFalse(report["generated_installer_executed"])
+        self.assertFalse(report["generated_installer_uploaded"])
+        with mock.patch.object(syntax.subprocess, "run") as run, self.assertRaises(ValueError):
+            syntax.compile_synthetic(self.work, self.compiler)
+        run.assert_not_called()
+
+    def test_zero_exit_mz_only_output_does_not_bypass_identity_check(self):
+        def malformed(command, **kwargs):
+            output = Path(next(value.split("=", 1)[1] for value in command if "DOUTPUT_FILE=" in value))
+            output.write_bytes(b"MZ not a complete PE resource fixture")
+            return subprocess.CompletedProcess(command, 0)
+        with mock.patch.object(syntax.subprocess, "run", side_effect=malformed), \
+             self.assertRaisesRegex(ValueError, "static identity preflight"):
+            syntax.compile_syntax(self.work, self.compiler)
+        self.assertTrue(self.report()["syntax_compiled"])
+        self.assertFalse(self.report()["installer_static_identity_passed"])
+        self.assertIn("installer_static_validation_error", self.report())
+
+    def test_synthetic_compilation_requires_positive_identity_gate(self):
+        self.compile_production_mock()
+        for value in (False, None, "true", 1):
+            report = self.report()
+            report["installer_static_identity_passed"] = value
+            (self.work / "evidence/installer-syntax.json").write_text(json.dumps(report))
+            with self.subTest(value=value), mock.patch.object(syntax.subprocess, "run") as run, self.assertRaises(ValueError):
+                syntax.compile_synthetic(self.work, self.compiler)
+            run.assert_not_called()
 
     def test_compiler_failure_retains_log_and_failed_evidence(self):
         result = subprocess.CompletedProcess([str(self.compiler)], 1)

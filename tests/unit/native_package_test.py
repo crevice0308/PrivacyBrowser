@@ -40,11 +40,12 @@ def node(key: str, value: bytes = b"", kind: int = 1, children: tuple = ()) -> b
     return struct.pack("<HHH", len(result), len(value) // 2 if kind == 1 else len(value), kind) + result[6:]
 
 
-def version_fixture(strings: dict | None = None, extra_table: dict | None = None, engine: str = ENGINE) -> bytes:
+def version_fixture(strings: dict | None = None, extra_table: dict | None = None, engine: str = ENGINE,
+                    structure_version: int = 0x10000) -> bytes:
     version = [int(part) for part in engine.split(".")]
     version += [0] * (4 - len(version))
     ms, ls = (version[0] << 16) | version[1], (version[2] << 16) | version[3]
-    fixed = struct.pack("<13I", 0xFEEF04BD, 0x10000, ms, ls, ms, ls, 0x3F, 0, 0x40004, 1, 0, 0, 0)
+    fixed = struct.pack("<13I", 0xFEEF04BD, structure_version, ms, ls, ms, ls, 0x3F, 0, 0x40004, 1, 0, 0, 0)
     tables = []
     for language, fields in (("040904B0", STRINGS if strings is None else strings), ("041104B0", extra_table)):
         if fields is not None:
@@ -55,9 +56,10 @@ def version_fixture(strings: dict | None = None, extra_table: dict | None = None
     return node("VS_VERSION_INFO", fixed, 0, (string_info, var_info))
 
 
-def resources_fixture(strings: dict | None = None, extra_table: dict | None = None, engine: str = ENGINE) -> dict:
+def resources_fixture(strings: dict | None = None, extra_table: dict | None = None, engine: str = ENGINE,
+                      structure_version: int = 0x10000) -> dict:
     count = struct.unpack_from("<H", ICON, 4)[0]
-    resources = {(16, 1, 1033): version_fixture(strings, extra_table, engine)}
+    resources = {(16, 1, 1033): version_fixture(strings, extra_table, engine, structure_version)}
     group = bytearray(struct.pack("<HHH", 0, 1, count))
     for index in range(count):
         width, height, colors, reserved, planes, bits, size, offset = struct.unpack_from("<BBBBHHII", ICON, 6 + index * 16)
@@ -159,6 +161,32 @@ def make_candidate(root: Path) -> tuple[Path, Path]:
 
 
 class NativePEResourceTests(unittest.TestCase):
+    def test_browser_fixed_structure_version_stays_exactly_one_zero(self):
+        for version in (0, 1, 0x10001, 0xFFFFFFFF):
+            resources = resources_fixture(structure_version=version)
+            with self.subTest(version=version), self.assertRaisesRegex(ValueError, "structure version"):
+                native.verify_versions(native.PE(pe_fixture(resources)), ENGINE)
+
+    def test_fixed_signature_is_never_relaxed_for_browser_or_installer(self):
+        for structure_version in (0, 0x10000):
+            for signature in (0, 0xBD04EFFE, 0xFEEF04BC):
+                resources = resources_fixture(structure_version=structure_version)
+                resource = bytearray(resources[(16, 1, 1033)])
+                offset = resource.index(struct.pack("<I", 0xFEEF04BD))
+                struct.pack_into("<I", resource, offset, signature)
+                resources[(16, 1, 1033)] = bytes(resource)
+                with self.subTest(version=structure_version, signature=signature), \
+                     self.assertRaisesRegex(ValueError, "signature"):
+                    native.read_versions(native.PE(pe_fixture(resources)), expected_structure_version=structure_version)
+
+    def test_structure_version_is_checked_in_every_resource_language(self):
+        for version in (0, 0x10000):
+            for path in ((16, 1, 1041), (16, 2, 1033)):
+                resources = resources_fixture(structure_version=version)
+                resources[path] = version_fixture(structure_version=version ^ 0x10000)
+                with self.subTest(version=version, resource=path), self.assertRaisesRegex(ValueError, "structure version"):
+                    native.read_versions(native.PE(pe_fixture(resources)), expected_structure_version=version)
+
     def test_resource_only_fixture_is_parsed_without_execution(self):
         pe = native.PE(pe_fixture())
         version = native.verify_versions(pe, ENGINE)
@@ -282,7 +310,7 @@ class NativeInstallerIdentityTests(unittest.TestCase):
         self.fields = {"ProductName": "PrivacyBrowser Setup", "FileDescription": "PrivacyBrowser Installer",
                        "InternalName": "PrivacyBrowser Setup", "OriginalFilename": native.SETUP_NAME,
                        "CompanyName": "PrivacyBrowser contributors", "FileVersion": "0.1.0-dev", "ProductVersion": "0.1.0-dev"}
-        self.resources = resources_fixture(self.fields, engine="0.1.0")
+        self.resources = resources_fixture(self.fields, engine="0.1.0", structure_version=0)
         self.installer.write_bytes(pe_fixture(self.resources, machine=0x14C))
 
     def test_i386_setup_wrapper_identity_has_separate_unexecuted_report(self):
@@ -292,6 +320,21 @@ class NativeInstallerIdentityTests(unittest.TestCase):
         self.assertFalse(result["payload_extraction_verified"])
         self.assertFalse(result["windows_execution_tested"])
         self.assertFalse(result["release_eligible"])
+        self.assertEqual(result["native_version_resources"][0]["fixed_structure_version"], 0)
+
+    def test_pinned_nsis_structure_version_is_exactly_zero(self):
+        for version in (1, 0x10000, 0x10001, 0xFFFFFFFF):
+            resources = resources_fixture(self.fields, engine="0.1.0", structure_version=version)
+            self.installer.write_bytes(pe_fixture(resources, machine=0x14C))
+            with self.subTest(version=version), self.assertRaisesRegex(ValueError, "structure version"):
+                native.validate_installer(self.installer)
+
+    def test_installer_branding_is_checked_in_all_language_tables(self):
+        resources = resources_fixture(self.fields, extra_table={**self.fields, "ProductName": "Firefox"},
+                                      engine="0.1.0", structure_version=0)
+        self.installer.write_bytes(pe_fixture(resources, machine=0x14C))
+        with self.assertRaisesRegex(ValueError, "ProductName"):
+            native.validate_installer(self.installer)
 
     def test_i386_setup_mode_cannot_weaken_default_amd64_browser_requirement(self):
         with self.assertRaises(ValueError):
@@ -302,15 +345,15 @@ class NativeInstallerIdentityTests(unittest.TestCase):
 
     def test_installer_wrong_identity_version_or_icon_is_rejected(self):
         for field in self.fields:
-            resources = resources_fixture({**self.fields, field: "Firefox"}, engine="0.1.0")
+            resources = resources_fixture({**self.fields, field: "Firefox"}, engine="0.1.0", structure_version=0)
             self.installer.write_bytes(pe_fixture(resources, machine=0x14C))
             with self.subTest(field=field), self.assertRaises(ValueError):
                 native.validate_installer(self.installer)
-        resources = resources_fixture(self.fields, engine="1.0.0")
+        resources = resources_fixture(self.fields, engine="1.0.0", structure_version=0)
         self.installer.write_bytes(pe_fixture(resources, machine=0x14C))
         with self.assertRaises(ValueError):
             native.validate_installer(self.installer)
-        resources = resources_fixture(self.fields, engine="0.1.0")
+        resources = resources_fixture(self.fields, engine="0.1.0", structure_version=0)
         del resources[(14, 1, 1033)]
         self.installer.write_bytes(pe_fixture(resources, machine=0x14C))
         with self.assertRaises(ValueError):

@@ -293,7 +293,7 @@ def version_node(data: bytes, start: int = 0, limit: int | None = None, depth: i
     return {"key": key, "kind": kind, "value": value, "children": children, "length": length}
 
 
-def read_versions(pe: PE) -> list[dict]:
+def read_versions(pe: PE, *, expected_structure_version: int = 0x10000) -> list[dict]:
     resources = {path: value for path, value in pe.resources.items() if path[0] == 16}
     require(resources, "Native VERSIONINFO is missing")
     reports = []
@@ -302,7 +302,9 @@ def read_versions(pe: PE) -> list[dict]:
         require(root["key"] == "VS_VERSION_INFO" and root["kind"] == 0 and root["length"] == len(data), "Malformed VERSIONINFO root")
         require(len(root["value"]) == 52, "Missing VS_FIXEDFILEINFO")
         fixed = unpack("<13I", root["value"])
-        require(fixed[0] == 0xFEEF04BD and fixed[1] == 0x10000, "Invalid VS_FIXEDFILEINFO signature")
+        require(fixed[0] == 0xFEEF04BD, "Invalid VS_FIXEDFILEINFO signature")
+        require(fixed[1] == expected_structure_version,
+                f"Unexpected VS_FIXEDFILEINFO structure version: 0x{fixed[1]:08x}; expected 0x{expected_structure_version:08x}")
         file_version = (fixed[2] >> 16, fixed[2] & 0xFFFF, fixed[3] >> 16, fixed[3] & 0xFFFF)
         product_version = (fixed[4] >> 16, fixed[4] & 0xFFFF, fixed[5] >> 16, fixed[5] & 0xFFFF)
         infos = [node for node in root["children"] if node["key"] == "StringFileInfo"]
@@ -318,6 +320,7 @@ def read_versions(pe: PE) -> list[dict]:
                 require(value.endswith("\0") and "\0" not in value[:-1], "Invalid native version text terminator")
                 fields[node["key"]] = value[:-1]
             reports.append({"resource": list(path), "language_table": table["key"], "strings": fields,
+                            "fixed_structure_version": fixed[1],
                             "file_version": list(file_version), "product_version": list(product_version)})
     return reports
 
@@ -373,7 +376,9 @@ def validate_installer(installer: Path, icon: Path = ROOT / "browser/privacy/ass
     require(installer.name == SETUP_NAME, "Unexpected native installer basename")
     require(icon.is_file() and not is_link_or_reparse(icon) and icon.stat().st_size <= MAX_RESOURCE_BYTES, "Missing/oversized reference ICO")
     pe = PE(read_pe_image(installer), expected_machine=0x14C)
-    versions = read_versions(pe)
+    # Pinned NSIS 3.07 zero-initializes dwStrucVersion and never assigns it.
+    # This exact installer-only expectation does not change the browser's 1.0.
+    versions = read_versions(pe, expected_structure_version=0)
     expected = {"ProductName": "PrivacyBrowser Setup", "FileDescription": "PrivacyBrowser Installer",
                 "InternalName": "PrivacyBrowser Setup", "OriginalFilename": SETUP_NAME,
                 "CompanyName": "PrivacyBrowser contributors", "FileVersion": "0.1.0-dev", "ProductVersion": "0.1.0-dev"}

@@ -130,7 +130,9 @@ class NativeInstallerSyntheticTests(unittest.TestCase):
         self.assertEqual(len(self.calls), 2)
 
     def test_fixture_process_refuses_arbitrary_or_production_executables(self):
-        for path in (self.work / "installer-syntax/DO-NOT-RUN-inert-installer-syntax.exe", self.root / "privacybrowser.exe"):
+        for path in (self.work / "installer-syntax/DO-NOT-RUN-inert-installer-syntax" / synthetic.native.SETUP_NAME,
+                     self.root / "privacybrowser.exe"):
+            path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b"inert")
             with mock.patch.object(synthetic.subprocess, "Popen") as run, self.assertRaises(ValueError):
                 synthetic.run_fixture(path, ["/S"], self.root, {}, mock.Mock(), [])

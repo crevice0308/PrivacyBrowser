@@ -132,6 +132,12 @@ InternalName is `PrivacyBrowser Setup`, and CompanyName is
 `0.1.0-dev`, with numeric version `0.1.0.0`. These are wrapper versions; the
 bundled browser must retain the Gecko engine version described above.
 
+The fixed VERSIONINFO signature must always be `0xFEEF04BD`. The browser's
+structure version remains exactly `0x00010000`. Only this pinned NSIS wrapper
+requires structure version `0`: NSIS 3.07 zero-initializes `dwStrucVersion` and
+exports it unchanged ([upstream implementation](https://github.com/nsis-dev/nsis/blob/f93a659006d720cbb6602371ade50935c9dd0e5e/Source/ResourceVersionInfo.cpp)).
+This is a separate exact toolchain expectation, not a relaxed signature check.
+
 NSIS uses an i386 PE32 launcher even for a Windows AMD64 payload. This architecture
 is enabled only by this separate installer checker. Browser validation still
 requires AMD64 PE32+. The same exact custom icon checks apply. PE section reads
@@ -150,7 +156,11 @@ with the independent branding. Neither the workflow nor its build job can write
 repository contents or publish releases.
 
 Before Gecko compilation, an isolated NSIS preflight compiles the installer
-template and exercises its shared file-safety routines against newly created
+template with inert payload and applies the same static version, branding, icon
+and architecture checks used for the real installer. A failed wrapper check
+retains diagnostic text and stops before the expensive build. This generated
+production-shaped fixture is never executed or uploaded. A separately isolated
+synthetic executable exercises its shared file-safety routines against newly created
 synthetic data inside the dedicated runner workspace. Production installation,
 real profile paths, browser startup and publication are excluded from that
 fixture. Its evidence is separate from the later genuine-browser installer and

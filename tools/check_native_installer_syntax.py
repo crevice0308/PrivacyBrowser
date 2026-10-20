@@ -59,7 +59,11 @@ def compile_syntax(work: Path, compiler: Path) -> dict:
     (runtime / "privacybrowser.exe").write_bytes(FIXTURE_BYTES)
     include = fixture / "inert-payload.nsh"
     payload = write_native_payload_include(runtime, include)
-    output = fixture / "DO-NOT-RUN-inert-installer-syntax.exe"
+    # Preserve the production basename so the exact, non-executing identity
+    # checker runs before Gecko. This inert fixture is never run or uploaded.
+    wrapper = fixture / "DO-NOT-RUN-inert-installer-syntax"
+    wrapper.mkdir()
+    output = wrapper / native.SETUP_NAME
     template = ROOT / "packaging/windows/privacy-browser-native.nsi"
     prefix = "/" if os.name == "nt" else "-"
     command = [str(compiler), prefix + "V3", prefix + "NOCD",
@@ -70,7 +74,8 @@ def compile_syntax(work: Path, compiler: Path) -> dict:
     report = {"schema_version": 1, "purpose": "inert-payload NSIS compilation preflight only",
               "compiler_sha256": COMPILER_SHA256, "template_sha256": native.digest(template),
               "payload_include_sha256": native.digest(include), "fixture_payload": payload,
-              "syntax_compiled": False, "generated_installer_executed": False,
+              "syntax_compiled": False, "installer_static_identity_passed": False,
+              "generated_installer_executed": False,
               "generated_installer_uploaded": False, "browser_compiled": False,
               "official_release": False, "release_eligible": False, "command": command}
     with log_path.open("x", encoding="utf-8") as log:
@@ -96,8 +101,15 @@ def compile_syntax(work: Path, compiler: Path) -> dict:
     if passed:
         report["generated_installer_sha256"] = native.digest(output)
         report["generated_installer_bytes"] = output.stat().st_size
+        try:
+            report["installer_static_validation"] = native.validate_installer(output)
+            report["installer_static_identity_passed"] = True
+        except (OSError, ValueError) as error:
+            report["installer_static_validation_error"] = str(error)[:4096]
     write_json(report_path, report)
     native.require(passed, "Native NSIS syntax preflight failed; inspect installer-syntax.log before building Gecko")
+    native.require(report["installer_static_identity_passed"],
+                   "Native NSIS static identity preflight failed; inspect installer-syntax.json before building Gecko")
     return report
 
 
@@ -107,6 +119,7 @@ def compile_synthetic(work: Path, compiler: Path) -> dict:
     fixture = work / "installer-syntax"
     production = native.load_json(work / "evidence/installer-syntax.json")
     native.require(production.get("syntax_compiled") is True
+                   and production.get("installer_static_identity_passed") is True
                    and production.get("generated_installer_executed") is False,
                    "Successful never-executed production syntax compilation must precede the synthetic harness")
     execution = work / synthetic.EXECUTION_RELATIVE
