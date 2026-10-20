@@ -994,7 +994,8 @@ Function CreateFreshInstallDirectory
   System::Call '*$1(i.r2)'
   System::Free $1
   IntOp $2 $2 & 0x410
-  ${If} $2 != 0x10
+  ; IntOp returns decimal text; LogicLib != is a string comparison.
+  ${If} $2 != 16
     Call DataRefusal
   ${EndIf}
   Pop $2

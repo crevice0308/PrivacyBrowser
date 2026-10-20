@@ -686,12 +686,30 @@ class NativeInstallerTemplateTests(unittest.TestCase):
         self.assertRegex(create, r"System::Alloc 52\s+Pop \$1\s+\$\{If\} \$1 == 0\s+Call DataRefusal")
         self.assertIn("GetFileInformationByHandle(p $InstallDirectoryLock, p r1) i.r2", create)
         self.assertRegex(create, r"i\.r2'\s+\$\{If\} \$2 == 0\s+Call DataRefusal")
-        self.assertRegex(create, r"IntOp \$2 \$2 & 0x410\s+\$\{If\} \$2 != 0x10\s+Call DataRefusal")
+        self.assertRegex(create, r"IntOp \$2 \$2 & 0x410\s+\$\{If\} \$2 != 16\s+Call DataRefusal")
         self.assertEqual(create.count("Call OpenNoReparse"), 1)
         self.assertNotRegex(create, r"(?i)IfFileExists|CreateDirectory|OpenSafeDirectory|CloseHandle|RMDir|Delete")
         self.assertEqual(re.findall(r"(?m)^\s*Push (\$\d)$", create), ["$0", "$1", "$2", "$0"])
         self.assertEqual(re.findall(r"(?m)^\s*Pop (\$\d)$", create), ["$1", "$2", "$1", "$0"])
         self.assertNotIn("Function un.CreateFreshInstallDirectory", self.commands)
+
+    def test_fresh_directory_attributes_use_decimal_logiclib_string_comparison(self):
+        # NSIS 3.07 IntOp emits decimal text. LogicLib != compiles to StrCmp,
+        # not IntCmp, so equivalent hexadecimal text would reject a valid dir.
+        create = self.function("CreateFreshInstallDirectory")
+        mask = re.search(r"IntOp \$2 \$2 & (0x[0-9A-Fa-f]+)", create)
+        predicate = re.search(r"\$\{If\} \$2 != (\S+)\s+Call DataRefusal", create)
+        self.assertIsNotNone(mask)
+        self.assertIsNotNone(predicate)
+        for attributes, accepted in ((0x10, True), (0x30, True), (0x11, True),
+                                     (0, False), (0x20, False), (0x400, False),
+                                     (0x410, False), (0x430, False)):
+            with self.subTest(attributes=attributes):
+                decimal_result = str(attributes & int(mask.group(1), 16))
+                self.assertEqual(decimal_result == predicate.group(1), accepted)
+        self.assertNotEqual(str(0x10 & 0x410), "0x10")
+        # No other hexadecimal literal may silently become a string comparison.
+        self.assertNotRegex(self.commands, r"\$\{(?:If|ElseIf|AndIf|OrIf)\}\s+\$\w+\s+(?:==|!=)\s+0x[0-9A-Fa-f]+")
 
     def test_production_and_synthetic_install_share_fresh_directory_creation(self):
         install = self.commands.split('Section "PrivacyBrowser"', 1)[1].split("SectionEnd", 1)[0]
