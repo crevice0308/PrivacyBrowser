@@ -191,6 +191,15 @@ manifest, source commit/run and native binary. Runtime smoke, artifact staging
 and prerelease validation all require it. Missing, failed or mismatched Places
 evidence cannot be replaced with a successful build/package assertion.
 
+Fresh application-directory creation is atomic: the installer refuses an
+existing object, including an empty directory, rather than interpreting NSIS's
+`directory\*.*` existence test as an emptiness check. The isolated synthetic
+preflight exercises the same create-and-pin helper and preserves colliding
+fixtures unchanged. Installer test commands retain bounded, exclusive phase,
+exit/start-error and timeout records before success assertions; these records
+contain no command paths, profile contents or registry values. They do not
+claim to identify an internal NSIS branch by themselves.
+
 `test_native_installer.ps1` is restricted to a fresh directory on an ephemeral
 GitHub-hosted runner. It checks all installed payload hashes, native metadata,
 per-user shortcuts and uninstall registration. A locked executable and a real

@@ -461,7 +461,7 @@ class NativeInstallerTemplateTests(unittest.TestCase):
         remaining = self.commands.replace(launcher, "")
         self.assertNotRegex(remaining, r"(?im)^\s*(?:Exec|ExecWait|ExecShell|Call\s+LaunchPrivacyBrowser)\b")
 
-    def test_installation_requires_empty_directory_before_payload_write(self):
+    def test_installation_refuses_existing_directory_before_payload_write(self):
         initializer = self.function(".onInit")
         self.assertIn('IfFileExists "$INSTDIR\\*.*" 0 ready', initializer)
         self.assertRegex(initializer, r'(?s)IfFileExists.*?MessageBox.*?Abort\s+ready:')
@@ -674,6 +674,50 @@ class NativeInstallerTemplateTests(unittest.TestCase):
         install = self.commands.split('Section "PrivacyBrowser"', 1)[1].split("SectionEnd", 1)[0]
         self.assertLess(install.rindex("Call EnsureOwnedRoot"), install.index("!insertmacro InstallPayload"))
         self.assertNotRegex(install, r"CloseHandle\(p \$(?:LocalRootLock|RoamingRootLock)\)")
+
+    def test_fresh_install_directory_is_created_and_pinned_atomically(self):
+        create = self.function("CreateFreshInstallDirectory")
+        self.assertRegex(create, r"\$\{If\} \$InstallDirectoryLock != 0\s+Call DataRefusal")
+        self.assertRegex(create, r'\$\{GetParent\} "\$INSTDIR" \$0\s+Push \$0\s+Call LockDirectoryChain')
+        self.assertLess(create.index("Call LockDirectoryChain"), create.index("Call OpenNoReparse"))
+        self.assertRegex(create, r"StrCpy \$NativeAccess 0x81\s+StrCpy \$NativeShare 3\s+StrCpy \$NativeDisposition 2\s+StrCpy \$NativeOptions 1\s+Push \$INSTDIR\s+Call OpenNoReparse\s+Pop \$InstallDirectoryLock")
+        self.assertNotIn("0x10081", create)
+        self.assertRegex(create, r"\$\{If\} \$InstallDirectoryLock == 0\s+\$\{OrIf\} \$InstallDirectoryLock == -1\s+Call DataRefusal")
+        self.assertRegex(create, r"System::Alloc 52\s+Pop \$1\s+\$\{If\} \$1 == 0\s+Call DataRefusal")
+        self.assertIn("GetFileInformationByHandle(p $InstallDirectoryLock, p r1) i.r2", create)
+        self.assertRegex(create, r"i\.r2'\s+\$\{If\} \$2 == 0\s+Call DataRefusal")
+        self.assertRegex(create, r"IntOp \$2 \$2 & 0x410\s+\$\{If\} \$2 != 0x10\s+Call DataRefusal")
+        self.assertEqual(create.count("Call OpenNoReparse"), 1)
+        self.assertNotRegex(create, r"(?i)IfFileExists|CreateDirectory|OpenSafeDirectory|CloseHandle|RMDir|Delete")
+        self.assertEqual(re.findall(r"(?m)^\s*Push (\$\d)$", create), ["$0", "$1", "$2", "$0"])
+        self.assertEqual(re.findall(r"(?m)^\s*Pop (\$\d)$", create), ["$1", "$2", "$1", "$0"])
+        self.assertNotIn("Function un.CreateFreshInstallDirectory", self.commands)
+
+    def test_production_and_synthetic_install_share_fresh_directory_creation(self):
+        install = self.commands.split('Section "PrivacyBrowser"', 1)[1].split("SectionEnd", 1)[0]
+        fixture = (ROOT / "packaging/windows/native-safety-fixture.nsh").read_text(encoding="utf-8")
+        synthetic = fixture.split("Function NativeSafetyFixtureMain", 1)[1].split("FunctionEnd", 1)[0]
+        for caller in (install, synthetic):
+            self.assertEqual(caller.count("Call CreateFreshInstallDirectory"), 1)
+            self.assertLess(caller.index("Call CreateFreshInstallDirectory"), caller.index("Call EnsureOwnedRoot"))
+            self.assertNotIn('CreateDirectory "$INSTDIR"', caller)
+            self.assertNotIn("Call LockInstallDirectory", caller)
+            self.assertNotIn('IfFileExists "$INSTDIR\\*.*"', caller)
+            self.assertNotIn("CloseHandle(p $InstallDirectoryLock)", caller)
+        self.assertLess(install.index("Call CreateFreshInstallDirectory"), install.index("!insertmacro InstallPayload"))
+        self.assertIn("Existing folders, even empty ones, are refused.", self.function(".onInit"))
+        self.assertRegex(synthetic, r'Call CreateFreshInstallDirectory\s+;[^\n]*\n\s+!insertmacro SyntheticPhase "" "set-application-output-path"\s+ClearErrors\s+SetOutPath "\$INSTDIR"\s+IfErrors 0 \+2\s+Call DataRefusal')
+        self.assertIn("kernel32::GetCurrentDirectoryW(i ${NSIS_MAX_STRLEN}, w .r0) i.r1", synthetic)
+        self.assertRegex(synthetic, r"i\.r1'\s+\$\{If\} \$1 == 0\s+\$\{OrIf\} \$1 >= \$\{NSIS_MAX_STRLEN\}\s+Call DataRefusal")
+        self.assertRegex(synthetic, r"StrCmpS \$0 \$INSTDIR \+2\s+Call DataRefusal")
+        self.assertLess(synthetic.index('SetOutPath "$INSTDIR"'), synthetic.index("GetCurrentDirectoryW"))
+        self.assertLess(synthetic.index("GetCurrentDirectoryW"), synthetic.index("Call EnsureOwnedRoot"))
+        self.assertNotIn("$OUTDIR", synthetic)
+        # Uninstall still opens its existing directory rather than creating one.
+        lock = self.function("${PREFIX}LockInstallDirectory")
+        self.assertRegex(lock, r'Call \$\{PREFIX\}LockDirectoryChain\s+StrCpy \$DirectoryAccess 0x10081\s+Push \$INSTDIR\s+Call \$\{PREFIX\}OpenSafeDirectory\s+Pop \$InstallDirectoryLock\s+StrCpy \$DirectoryAccess 0x81')
+        self.assertIn("Call un.LockInstallDirectory", self.function("un.onInit"))
+        self.assertIn("Call un.LockInstallDirectory", fixture)
 
     def test_both_trees_preflight_before_files_and_markers_are_deleted_last(self):
         purge = self.function("un.PurgeOwnedData")
@@ -947,8 +991,9 @@ class NativeInstallerTemplateTests(unittest.TestCase):
     def test_synthetic_init_diagnostics_identify_each_phase_before_work(self):
         fixture = (ROOT / "packaging/windows/native-safety-fixture.nsh").read_text(encoding="utf-8")
         for prefix, phases in (("", ("ordinary-unicode-open", "ordinary-unicode-close", "initialize-data-paths",
-                                    "check-empty-application", "lock-fixture-parent", "create-application-directory",
-                                    "lock-application-directory", "ensure-owned-local-root", "ensure-owned-roaming-root",
+                                    "create-fresh-application-directory", "set-application-output-path",
+                                    "verify-application-current-directory",
+                                    "ensure-owned-local-root", "ensure-owned-roaming-root",
                                     "write-synthetic-uninstaller", "initialization-complete")),
                                ("un.", ("uninstall-initialize-data-paths", "uninstall-lock-application",
                                         "uninstall-verify-local-root", "uninstall-verify-roaming-root",

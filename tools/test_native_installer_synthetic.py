@@ -155,11 +155,74 @@ def execute_synthetic(work: Path, compilation: dict) -> dict:
             foreign = root / "foreign/retain.txt"
             foreign.write_bytes(b"foreign synthetic sibling; must never be removed")
             retained = {ordinary: native.digest(ordinary), foreign: native.digest(foreign)}
+            app = root / "app"
+            protected = [root / name for name in ("local", "roaming", "foreign")]
+            protected_baseline = snapshot(protected)
+
+            def refuse_creation(case: str) -> None:
+                log.write((json.dumps({"creation_collision": case}) + "\n").encode())
+                native.require(run_fixture(executable, ["/S"], root, environment, log, commands) != 0,
+                               f"Synthetic existing {case} application path was not refused")
+                native.require(snapshot(protected) == protected_baseline,
+                               f"Synthetic {case} refusal changed data outside the application path")
+                for path, expected in retained.items():
+                    native.require(path.is_file() and native.digest(path) == expected,
+                                   f"Synthetic {case} refusal changed a retained fixture")
+
+            def application_identity() -> tuple[int, int, int]:
+                info = app.lstat()
+                return info.st_dev, info.st_ino, info.st_mode
+
+            # Authored collisions are removed only after proving that the
+            # installer refused them untouched. No existing object is adopted.
+            app.mkdir()
+            empty_identity = application_identity()
+            refuse_creation("empty directory")
+            native.require(application_identity() == empty_identity and snapshot([app]) == {},
+                           "Synthetic empty application directory was changed")
+            app.rmdir()
+            checks["existing_empty_application_directory_refused_untouched"] = True
+
+            app.mkdir()
+            (app / "nested").mkdir()
+            collision = app / "nested/retain-日本語.txt"
+            collision.write_bytes(b"existing synthetic application data; retain exactly")
+            nonempty_identity, nonempty_baseline = application_identity(), snapshot([app])
+            refuse_creation("nonempty directory")
+            native.require(application_identity() == nonempty_identity and snapshot([app]) == nonempty_baseline,
+                           "Synthetic nonempty application directory was changed")
+            collision.unlink()
+            (app / "nested").rmdir()
+            app.rmdir()
+            checks["existing_nonempty_application_directory_refused_untouched"] = True
+
+            app.write_bytes(b"existing synthetic file at application path; retain exactly")
+            file_identity, file_hash = application_identity(), native.digest(app)
+            refuse_creation("file")
+            native.require(application_identity() == file_identity and native.digest(app) == file_hash,
+                           "Synthetic application file collision was changed")
+            app.unlink()
+            checks["existing_application_file_refused_untouched"] = True
+
+            make_junction(app, foreign.parent, environment, log)
+            junction_identity, junction_target = application_identity(), os.readlink(app)
+            try:
+                refuse_creation("junction")
+                native.require(application_identity() == junction_identity
+                               and native.is_link_or_reparse(app) and os.readlink(app) == junction_target,
+                               "Synthetic application junction was changed")
+            finally:
+                remove_junction(app)
+            checks["existing_application_junction_refused_untouched"] = True
+
+            native.require(not app.exists() and not app.is_symlink(), "Synthetic application path must be fresh")
             result = run_fixture(executable, ["/S"], root, environment, log, commands)
             native.require(result == 0, "Synthetic initialization/ordinary Unicode NT open failed")
-            app = root / "app"
+            native.require(app.is_dir() and not native.is_link_or_reparse(app),
+                           "Fresh synthetic application directory was not created safely")
             uninstaller = native.regular_file(root, "app/uninstall.exe")
             uninstaller_hash = native.digest(uninstaller)
+            checks["fresh_application_directory_created"] = True
             owned = [root / "local/PrivacyBrowser", root / "roaming/PrivacyBrowser"]
             for path in owned:
                 expected = ("PrivacyBrowser-UserData-v1\r\n" + str(app) + "\r\n" + str(path) + "\r\n").encode("utf-16-le")

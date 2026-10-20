@@ -25,16 +25,22 @@ Function NativeSafetyFixtureMain
   ${EndIf}
   !insertmacro SyntheticPhase "" "initialize-data-paths"
   Call InitializeDataPaths
-  !insertmacro SyntheticPhase "" "check-empty-application"
-  IfFileExists "$INSTDIR\*.*" 0 +2
+  !insertmacro SyntheticPhase "" "create-fresh-application-directory"
+  Call CreateFreshInstallDirectory
+  ; Production payload extraction sets this path while the create handle is held.
+  !insertmacro SyntheticPhase "" "set-application-output-path"
+  ClearErrors
+  SetOutPath "$INSTDIR"
+  IfErrors 0 +2
     Call DataRefusal
-  !insertmacro SyntheticPhase "" "lock-fixture-parent"
-  Push "${PB_SYNTHETIC_ROOT}"
-  Call LockDirectoryChain
-  !insertmacro SyntheticPhase "" "create-application-directory"
-  CreateDirectory "$INSTDIR"
-  !insertmacro SyntheticPhase "" "lock-application-directory"
-  Call LockInstallDirectory
+  !insertmacro SyntheticPhase "" "verify-application-current-directory"
+  System::Call 'kernel32::GetCurrentDirectoryW(i ${NSIS_MAX_STRLEN}, w .r0) i.r1'
+  ${If} $1 == 0
+  ${OrIf} $1 >= ${NSIS_MAX_STRLEN}
+    Call DataRefusal
+  ${EndIf}
+  StrCmpS $0 $INSTDIR +2
+    Call DataRefusal
   !insertmacro SyntheticPhase "" "ensure-owned-local-root"
   Push $LocalDataRoot
   Call EnsureOwnedRoot

@@ -1,5 +1,5 @@
 """Pure Python fixtures/mocked Win32 and child processes; never execute a setup."""
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 import json
 import os
 from pathlib import Path
@@ -27,6 +27,8 @@ class NativeInstallerSyntheticTests(unittest.TestCase):
         self.compilation = {"synthetic_fixture_compiled": True, "fixture_root": synthetic.EXECUTION_WINDOWS,
                             "generated_installer_sha256": synthetic.native.digest(self.executable), "release_eligible": False}
         self.calls = []
+        self.uninstall_calls = 0
+        self.junction_targets = {}
 
     def report(self):
         return json.loads((self.work / "evidence/installer-synthetic-execution.json").read_text())
@@ -39,9 +41,11 @@ class NativeInstallerSyntheticTests(unittest.TestCase):
         commands.append({"argv": [str(executable), *arguments], "started": True, "exit_code": 0})
         app = root / "app"
         owned = [root / "local/PrivacyBrowser", root / "roaming/PrivacyBrowser"]
-        if len(self.calls) == 1:
-            self.assertEqual(executable, self.executable)
+        if executable == self.executable:
             self.assertEqual(arguments, ["/S"])
+            if app.exists():
+                commands[-1]["exit_code"] = 1
+                return 1
             app.mkdir()
             (app / "uninstall.exe").write_bytes(b"MZinert generated-uninstaller fixture")
             for path in owned:
@@ -51,34 +55,52 @@ class NativeInstallerSyntheticTests(unittest.TestCase):
         else:
             self.assertEqual(executable, app / "uninstall.exe")
             self.assertEqual(arguments, ["/S", "_?=" + str(app)])
-            if len(self.calls) in (2, 3, 4):
+            self.uninstall_calls += 1
+            if self.uninstall_calls in (1, 2, 3):
                 commands[-1]["exit_code"] = 1
                 return 1
-            if len(self.calls) == 5:
+            if self.uninstall_calls == 4:
                 # Simulate NSIS only inside this unit test's new temporary data.
                 for path in owned:
                     shutil.rmtree(path)
         return 0
 
-    def execution_mocks(self):
-        return (mock.patch.object(synthetic, "require_host"),
-                mock.patch.object(synthetic, "run_fixture", side_effect=self.fake_run),
-                mock.patch.object(synthetic, "locked_file", return_value=nullcontext()),
-                mock.patch.object(synthetic, "make_junction", side_effect=lambda path, *_: path.mkdir()),
-                mock.patch.object(synthetic, "remove_junction", side_effect=lambda path: path.rmdir()))
+    @contextmanager
+    def execution_mocks(self, runner=None):
+        is_reparse = synthetic.native.is_link_or_reparse
+        readlink = os.readlink
+
+        def make_junction(path, target, *_):
+            path.mkdir()
+            self.junction_targets[path] = str(target)
+
+        def remove_junction(path):
+            path.rmdir()
+            del self.junction_targets[path]
+
+        with mock.patch.object(synthetic, "require_host"), \
+             mock.patch.object(synthetic, "run_fixture", side_effect=runner or self.fake_run), \
+             mock.patch.object(synthetic, "locked_file", return_value=nullcontext()), \
+             mock.patch.object(synthetic, "make_junction", side_effect=make_junction), \
+             mock.patch.object(synthetic, "remove_junction", side_effect=remove_junction), \
+             mock.patch.object(synthetic.native, "is_link_or_reparse",
+                               side_effect=lambda path: path in self.junction_targets or is_reparse(path)), \
+             mock.patch.object(synthetic.os, "readlink",
+                               side_effect=lambda path: self.junction_targets[path] if path in self.junction_targets else readlink(path)):
+            yield
 
     def test_full_harness_with_mocked_execution_distinguishes_production(self):
-        host, runner, lock, junction, remove = self.execution_mocks()
-        with host, runner, lock, junction, remove:
+        with self.execution_mocks():
             report = synthetic.execute_synthetic(self.work, self.compilation)
-        self.assertEqual(len(self.calls), 6)
+        self.assertEqual(len(self.calls), 10)
+        self.assertEqual([item["exit_code"] for item in report["commands"][:5]], [1, 1, 1, 1, 0])
         self.assertTrue(report["passed"])
         self.assertTrue(report["synthetic_fixture_executed"])
         self.assertFalse(report["production_syntax_installer_executed"])
         self.assertFalse(report["browser_executed"])
         self.assertFalse(report["release_eligible"])
         self.assertFalse(report["generated_executables_uploaded"])
-        self.assertEqual(len(report["checks"]), 8)
+        self.assertEqual(len(report["checks"]), 13)
         self.assertTrue(all(value is True for value in report["checks"].values()))
         self.assertEqual(self.report(), report)
         self.assertTrue((self.root / "foreign/retain.txt").is_file())
@@ -108,26 +130,67 @@ class NativeInstallerSyntheticTests(unittest.TestCase):
 
     def test_failed_initialization_retains_truthful_failed_report(self):
         def failure(exe, args, root, env, log, commands):
+            if (root / "app").exists():
+                return self.fake_run(exe, args, root, env, log, commands)
             commands.append({"started": True, "exit_code": 1})
             return 1
-        with mock.patch.object(synthetic, "require_host"), \
-             mock.patch.object(synthetic, "run_fixture", side_effect=failure), self.assertRaises(ValueError):
+        with self.execution_mocks(failure), self.assertRaises(ValueError):
             synthetic.execute_synthetic(self.work, self.compilation)
         report = self.report()
         self.assertTrue(report["synthetic_fixture_executed"])
         self.assertFalse(report["passed"])
-        self.assertEqual(report["checks"], {})
+        self.assertEqual(len(report["checks"]), 4)
+        self.assertNotIn("fresh_application_directory_created", report["checks"])
+        self.assertIn("initialization/ordinary Unicode NT open failed", report["error"])
 
     def test_unexpected_success_on_invalid_marker_fails_closed(self):
         def permissive(*args):
             result = self.fake_run(*args)
-            return 0 if len(self.calls) == 2 else result
-        with mock.patch.object(synthetic, "require_host"), \
-             mock.patch.object(synthetic, "run_fixture", side_effect=permissive), self.assertRaises(ValueError):
+            return 0 if self.uninstall_calls == 1 else result
+        with self.execution_mocks(permissive), self.assertRaises(ValueError):
             synthetic.execute_synthetic(self.work, self.compilation)
         self.assertFalse(self.report()["passed"])
         self.assertIn("not refused", self.report()["error"])
+        self.assertEqual(len(self.calls), 6)
+
+    def test_successful_adoption_of_existing_empty_directory_fails_closed(self):
+        def permissive(*args):
+            self.fake_run(*args)
+            return 0
+        with self.execution_mocks(permissive), self.assertRaises(ValueError):
+            synthetic.execute_synthetic(self.work, self.compilation)
+        report = self.report()
+        self.assertFalse(report["passed"])
+        self.assertEqual(report["checks"], {})
+        self.assertIn("existing empty directory application path was not refused", report["error"])
+        self.assertEqual(len(self.calls), 1)
+        self.assertTrue((self.root / "app").is_dir())
+
+    def test_mutated_nonempty_directory_on_refusal_fails_closed(self):
+        def destructive(*args):
+            result = self.fake_run(*args)
+            collision = self.root / "app/nested/retain-日本語.txt"
+            if collision.is_file():
+                collision.write_bytes(b"incorrectly changed")
+            return result
+        with self.execution_mocks(destructive), self.assertRaises(ValueError):
+            synthetic.execute_synthetic(self.work, self.compilation)
+        report = self.report()
+        self.assertFalse(report["passed"])
+        self.assertIn("nonempty application directory was changed", report["error"])
         self.assertEqual(len(self.calls), 2)
+        self.assertTrue((self.root / "app/nested/retain-日本語.txt").is_file())
+
+    def test_creation_refusal_cannot_mutate_owned_data_parents(self):
+        def destructive(*args):
+            result = self.fake_run(*args)
+            (self.root / "local/unexpected.txt").write_bytes(b"must not be written")
+            return result
+        with self.execution_mocks(destructive), self.assertRaises(ValueError):
+            synthetic.execute_synthetic(self.work, self.compilation)
+        self.assertFalse(self.report()["passed"])
+        self.assertIn("refusal changed data outside the application path", self.report()["error"])
+        self.assertEqual(len(self.calls), 1)
 
     def test_fixture_process_refuses_arbitrary_or_production_executables(self):
         for path in (self.work / "installer-syntax/DO-NOT-RUN-inert-installer-syntax" / synthetic.native.SETUP_NAME,

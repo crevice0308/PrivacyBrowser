@@ -954,6 +954,54 @@ FunctionEnd
 !macroend
 !insertmacro OwnershipFunctions ""
 !insertmacro OwnershipFunctions "un."
+
+; Installer-only: atomically create a new directory and keep that exact handle.
+; FILE_CREATE refuses every existing object, including an empty directory.
+; Never adopt, remove, or close/reopen an object at the installation path.
+Function CreateFreshInstallDirectory
+  Push $0
+  Push $1
+  Push $2
+  ${If} $InstallDirectoryLock != 0
+    Call DataRefusal
+  ${EndIf}
+  ${GetParent} "$INSTDIR" $0
+  Push $0
+  Call LockDirectoryChain
+  ; Installation needs only LIST_DIRECTORY/READ_ATTRIBUTES. Omitting DELETE
+  ; permits SetOutPath's current-directory handle; share 3 still pins this name.
+  StrCpy $NativeAccess 0x81
+  StrCpy $NativeShare 3
+  StrCpy $NativeDisposition 2
+  StrCpy $NativeOptions 1
+  Push $INSTDIR
+  Call OpenNoReparse
+  Pop $InstallDirectoryLock
+  ${If} $InstallDirectoryLock == 0
+  ${OrIf} $InstallDirectoryLock == -1
+    Call DataRefusal
+  ${EndIf}
+  ; Preserve OpenSafeDirectory's attribute checks on the returned handle.
+  System::Alloc 52
+  Pop $1
+  ${If} $1 == 0
+    Call DataRefusal
+  ${EndIf}
+  System::Call 'kernel32::GetFileInformationByHandle(p $InstallDirectoryLock, p r1) i.r2'
+  ${If} $2 == 0
+    Call DataRefusal
+  ${EndIf}
+  System::Call '*$1(i.r2)'
+  System::Free $1
+  IntOp $2 $2 & 0x410
+  ${If} $2 != 0x10
+    Call DataRefusal
+  ${EndIf}
+  Pop $2
+  Pop $1
+  Pop $0
+FunctionEnd
+
 !ifdef PB_SYNTHETIC_FIXTURE
   !include "${PB_SYNTHETIC_INCLUDE}"
 !endif
@@ -1024,7 +1072,7 @@ Function .onInit
     Abort
   ${EndIf}
   IfFileExists "$INSTDIR\*.*" 0 ready
-    MessageBox MB_OK|MB_ICONSTOP "The installation folder is not empty. Uninstall the existing copy or choose a new empty folder. No files have been changed." /SD IDOK
+    MessageBox MB_OK|MB_ICONSTOP "The installation folder already exists. Existing folders, even empty ones, are refused. Uninstall the existing copy or choose a new folder that does not exist. No files have been changed." /SD IDOK
     SetErrorLevel 1
     Abort
   ready:
@@ -1063,22 +1111,11 @@ Section "PrivacyBrowser"
   SetShellVarContext current
   SetRegView 64
   Call RejectExistingMetadata
-  IfFileExists "$INSTDIR\*.*" 0 install_still_empty
-    Call DataRefusal
-  install_still_empty:
-  ; Create only the empty application directory after validating its parents.
   ; For the default path, Programs may not yet exist on a fresh account.
   ${If} $INSTDIR == "$LOCALAPPDATA\Programs\PrivacyBrowser"
     CreateDirectory "$LOCALAPPDATA\Programs"
   ${EndIf}
-  ${GetParent} "$INSTDIR" $0
-  Push $0
-  Call LockDirectoryChain
-  CreateDirectory "$INSTDIR"
-  Call LockInstallDirectory
-  IfFileExists "$INSTDIR\*.*" 0 app_directory_pinned_empty
-    Call DataRefusal
-  app_directory_pinned_empty:
+  Call CreateFreshInstallDirectory
   StrCpy $0 "$INSTDIR\PrivacyBrowser.install-marker"
   StrCpy $1 "PrivacyBrowser 0.1.0-dev"
   Call WriteNewAsciiFile

@@ -17,15 +17,51 @@ function Assert-True([bool]$Condition, [string]$Description) {
 function File-Hash([string]$Path) {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
-function Run-Bounded([string]$File, [string[]]$Arguments, [int]$Seconds = 120) {
-    $process = Start-Process -FilePath $File -ArgumentList $Arguments -PassThru
-    if (-not $process.WaitForExit($Seconds * 1000)) {
-        # This is the exact process tree created by this test, never a name match.
-        if (-not $process.HasExited) { $process.Kill($true) }
-        throw 'The generated installer process exceeded the test timeout.'
+function Run-Bounded([string]$File, [string[]]$Arguments, [int]$Seconds = 120,
+                     [ValidateSet('initial-install', 'places-xpcshell', 'installer-operation')][string]$Phase = 'installer-operation') {
+    # Retain fixed phase/outcome facts before the caller asserts success. Never
+    # log command paths, profile contents, environment values or registry data.
+    $script:InstallerOperationNumber++
+    Assert-True ($script:InstallerOperationNumber -le 32) 'Installer operation diagnostic limit exceeded.'
+    $attempt = [ordered]@{
+        schema_version = 1; phase = $Phase; sequence = $script:InstallerOperationNumber
+        started = $false; exit_code = $null; timed_out = $false
+        process_tree_kill_requested = $false; error_type = $null; error_hresult = $null
+        elapsed_seconds = 0
     }
-    $process.Refresh()
-    return $process.ExitCode
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    $process = $null
+    try {
+        $process = Start-Process -FilePath $File -ArgumentList $Arguments -PassThru
+        $attempt.started = $true
+        if (-not $process.WaitForExit($Seconds * 1000)) {
+            $attempt.timed_out = $true
+            # This is the exact process tree created by this test, never a name match.
+            if (-not $process.HasExited) {
+                $process.Kill($true)
+                $attempt.process_tree_kill_requested = $true
+                $null = $process.WaitForExit(20000)
+            }
+            throw 'The generated installer process exceeded the test timeout.'
+        }
+        $process.Refresh()
+        $attempt.exit_code = $process.ExitCode
+        return $process.ExitCode
+    } catch {
+        $attempt.error_type = $_.Exception.GetType().FullName
+        $attempt.error_hresult = $_.Exception.HResult
+        throw
+    } finally {
+        $timer.Stop()
+        $attempt.elapsed_seconds = [math]::Round($timer.Elapsed.TotalSeconds, 2)
+        $report = Join-Path (Split-Path -Parent $Output) ('windows-installer-operation-{0:D2}.json' -f $script:InstallerOperationNumber)
+        $stream = [IO.File]::Open($report, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        try {
+            $bytes = [Text.Encoding]::UTF8.GetBytes(($attempt | ConvertTo-Json -Compress) + [Environment]::NewLine)
+            Assert-True ($bytes.Length -le 4096) 'Installer operation diagnostic exceeds its bound.'
+            $stream.Write($bytes, 0, $bytes.Length)
+        } finally { $stream.Dispose() }
+    }
 }
 function Association-Snapshot {
     # Compare selected default-browser/file-association state without logging it.
@@ -99,6 +135,7 @@ $downloadFixture = Join-Path $WorkRoot 'retained-download-fixture.txt'
 Set-Content -LiteralPath $downloadFixture -Value 'retain this generated download fixture' -NoNewline
 $downloadHash = File-Hash $downloadFixture
 $checks = [ordered]@{}
+$script:InstallerOperationNumber = 0
 
 # A real Win32 fixture verifies that FILE_LIST_DIRECTORY|READ_ATTRIBUTES with
 # read/write sharing, but no delete sharing, blocks directory renaming.
@@ -134,7 +171,7 @@ try {
 Assert-True (Test-Path -LiteralPath $renamedProbe -PathType Container) 'The unlocked fixture could not be renamed.'
 $checks.directory_handle_blocks_rename = $true
 
-$exitCode = Run-Bounded $Installer @('/S', ('/D=' + $installDir)) 180
+$exitCode = Run-Bounded $Installer @('/S', ('/D=' + $installDir)) 180 'initial-install'
 Assert-True ($exitCode -eq 0) 'Silent per-user installation failed.'
 Assert-True ((File-Hash $exe) -ceq $nativeHash) 'The installed executable differs from the validated native runtime.'
 Assert-True ((Get-Content -LiteralPath $marker -Raw) -ceq 'PrivacyBrowser 0.1.0-dev') 'The generated installation marker is invalid.'
@@ -180,7 +217,7 @@ $checks.per_user_registration = $true
 # Xpcshell's crash helper also uses the actual roaming profile folder. Run the
 # genuine Places test only now: both roots were absent, then created by this
 # installer, and their exact ownership/payload/registration were verified above.
-$placesExit = Run-Bounded 'cmd.exe' @('/d', '/c', 'D:\pb\run-places-smoke.cmd') 600
+$placesExit = Run-Bounded 'cmd.exe' @('/d', '/c', 'D:\pb\run-places-smoke.cmd') 600 'places-xpcshell'
 Assert-True ($placesExit -eq 0) 'The genuine Places xpcshell test failed.'
 & python (Join-Path $PSScriptRoot 'windows_places_smoke.py') --work-root 'D:\pb'
 Assert-True ($LASTEXITCODE -eq 0) 'Matching retained Places test evidence is required.'
