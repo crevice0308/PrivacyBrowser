@@ -200,6 +200,17 @@ exit/start-error and timeout records before success assertions; these records
 contain no command paths, profile contents or registry values. They do not
 claim to identify an internal NSIS branch by themselves.
 
+The current shortcut-diagnostic revision deliberately pauses the expensive
+full-build job after quality and synthetic validation. It exercises inert
+ASCII/Unicode shortcut targets entirely inside the isolated fixture root,
+without executing links or targets or changing Desktop/Start Menu entries.
+Bounded readback evidence distinguishes explicit wide ShellLink retrieval from
+WScript retrieval, and direct links from copied ownership snapshots. Exact
+target, argument and icon checks are not relaxed. Even a successful synthetic
+round trip does not explain the previous real-installation mismatch by itself.
+The full-build pause must be removed in a separately reviewed source change
+after the diagnostic evidence is inspected; it does not authorize publication.
+
 `test_native_installer.ps1` is restricted to a fresh directory on an ephemeral
 GitHub-hosted runner. It checks all installed payload hashes, native metadata,
 per-user shortcuts and uninstall registration. A locked executable and a real

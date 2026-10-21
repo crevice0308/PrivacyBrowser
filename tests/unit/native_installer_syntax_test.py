@@ -239,10 +239,17 @@ class NativeInstallerSyntaxTests(unittest.TestCase):
         packager = (ROOT / "tools/package_windows_native.py").read_text()
         self.assertNotIn("PB_SYNTHETIC", packager)
         hook = (ROOT / "packaging/windows/native-safety-fixture.nsh").read_text(encoding="utf-8")
-        for forbidden in ("ExecShell", "ExecWait", "CreateShortcut", "WriteReg", "DeleteReg", "$APPDATA", "$LOCALAPPDATA"):
+        for forbidden in ("ExecShell", "ExecWait", "WriteReg", "DeleteReg", "$APPDATA", "$LOCALAPPDATA", "$DESKTOP", "$SMPROGRAMS"):
             self.assertNotIn(forbidden, hook)
         self.assertIn("Call OpenNoReparse", hook)
         self.assertIn("Call un.PurgeOwnedData", hook)
+        self.assertIn('!ifndef PB_SYNTHETIC_FIXTURE', hook)
+        self.assertEqual(hook.count('  CreateShortcut '), 1)
+        self.assertIn('!macro SyntheticNewShortcut PATH TARGET ARGUMENTS ICON', hook)
+        self.assertIn('!insertmacro SyntheticNewShortcutDirectory "$INSTDIR\\shortcut-probe"', hook)
+        self.assertEqual(hook.count('  !insertmacro SyntheticShortcutCase '), 3)
+        self.assertIn('Call CopyNewShortcut', hook)
+        self.assertIn('${OrIf} $NativeError != 2', hook)
         template = (ROOT / "packaging/windows/privacy-browser-native.nsi").read_text(encoding="utf-8")
         self.assertIn('!ifdef PB_SYNTHETIC_FIXTURE\nInstallDir "${PB_SYNTHETIC_ROOT}\\app"\n!else\n'
                       'InstallDir "$LOCALAPPDATA\\Programs\\PrivacyBrowser"\n!endif', template)

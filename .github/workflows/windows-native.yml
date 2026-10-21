@@ -75,7 +75,10 @@ jobs:
 
   build:
     needs: [changes, installer-safety]
+    # Diagnostic-only shortcut revision: inspect retained synthetic readback
+    # before explicitly restoring the full-build job in a reviewed source change.
     if: >-
+      false &&
       needs.changes.outputs.build_required == 'true' &&
       needs['installer-safety'].result == 'success' &&
       github.event.workflow_run.conclusion == 'success' &&

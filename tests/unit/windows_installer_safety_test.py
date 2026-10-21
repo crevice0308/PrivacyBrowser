@@ -181,6 +181,16 @@ class FastInstallerSafetyTests(unittest.TestCase):
         self.assertIn("contents: read", workflow)
         self.assertNotIn("contents: write", workflow)
 
+    def test_shortcut_diagnostic_revision_pauses_only_the_expensive_build(self):
+        workflow = (ROOT / ".github/workflows/windows-native.yml").read_text()
+        fast_job = workflow.split("\n  installer-safety:\n", 1)[1].split("\n  build:\n", 1)[0]
+        build_job = workflow.split("\n  build:\n", 1)[1]
+        self.assertNotIn("false &&", fast_job)
+        self.assertIn("Diagnostic-only shortcut revision", build_job)
+        self.assertRegex(build_job, r"if: >-\s+false &&\s+needs\.changes\.outputs\.build_required == 'true'")
+        self.assertIn("needs['installer-safety'].result == 'success'", build_job)
+        self.assertEqual(json.loads((ROOT / "config/native-prerelease-request.json").read_text())["enabled"], False)
+
 
 if __name__ == "__main__":
     unittest.main()

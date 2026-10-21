@@ -29,6 +29,7 @@ class NativeInstallerSyntheticTests(unittest.TestCase):
         self.calls = []
         self.uninstall_calls = 0
         self.junction_targets = {}
+        self.reader_calls = 0
 
     def report(self):
         return json.loads((self.work / "evidence/installer-synthetic-execution.json").read_text())
@@ -65,8 +66,17 @@ class NativeInstallerSyntheticTests(unittest.TestCase):
                     shutil.rmtree(path)
         return 0
 
+    def fake_reader(self, work, root, environment, log, commands):
+        # An explicit mock, not PowerShell/COM execution or Windows evidence.
+        self.reader_calls += 1
+        self.assertEqual(len(self.calls), 5)
+        self.assertEqual(self.uninstall_calls, 0)
+        self.assertTrue((root / "app/uninstall.exe").is_file())
+        self.assertFalse((root / "local/PrivacyBrowser/Profile-日本語").exists())
+        return {"path": synthetic.SHORTCUT_OUTPUT, "sha256": "f" * 64, "mocked": True}
+
     @contextmanager
-    def execution_mocks(self, runner=None):
+    def execution_mocks(self, runner=None, reader=None):
         is_reparse = synthetic.native.is_link_or_reparse
         readlink = os.readlink
 
@@ -80,6 +90,7 @@ class NativeInstallerSyntheticTests(unittest.TestCase):
 
         with mock.patch.object(synthetic, "require_host"), \
              mock.patch.object(synthetic, "run_fixture", side_effect=runner or self.fake_run), \
+             mock.patch.object(synthetic, "run_shortcut_readback", side_effect=reader or self.fake_reader), \
              mock.patch.object(synthetic, "locked_file", return_value=nullcontext()), \
              mock.patch.object(synthetic, "make_junction", side_effect=make_junction), \
              mock.patch.object(synthetic, "remove_junction", side_effect=remove_junction), \
@@ -100,7 +111,9 @@ class NativeInstallerSyntheticTests(unittest.TestCase):
         self.assertFalse(report["browser_executed"])
         self.assertFalse(report["release_eligible"])
         self.assertFalse(report["generated_executables_uploaded"])
-        self.assertEqual(len(report["checks"]), 13)
+        self.assertEqual(len(report["checks"]), 14)
+        self.assertTrue(report["checks"]["synthetic_shortcut_roundtrip_readback"])
+        self.assertEqual(self.reader_calls, 1)
         self.assertTrue(all(value is True for value in report["checks"].values()))
         self.assertEqual(self.report(), report)
         self.assertTrue((self.root / "foreign/retain.txt").is_file())
@@ -141,7 +154,27 @@ class NativeInstallerSyntheticTests(unittest.TestCase):
         self.assertFalse(report["passed"])
         self.assertEqual(len(report["checks"]), 4)
         self.assertNotIn("fresh_application_directory_created", report["checks"])
+        self.assertEqual(self.reader_calls, 0)
         self.assertIn("initialization/ordinary Unicode NT open failed", report["error"])
+
+    def test_shortcut_readback_failure_retains_diagnostics_and_prevents_destructive_cases(self):
+        path = self.work / "evidence" / synthetic.SHORTCUT_OUTPUT
+        retained = {"passed": False, "expected": "fixed synthetic target", "actual": "different target"}
+        def failed_reader(*args):
+            self.fake_reader(*args)
+            path.write_text(json.dumps(retained))
+            raise ValueError("Synthetic shortcut readback failed; retain shortcut diagnostics")
+        with self.execution_mocks(reader=failed_reader), self.assertRaisesRegex(ValueError, "shortcut readback"):
+            synthetic.execute_synthetic(self.work, self.compilation)
+        report = self.report()
+        self.assertFalse(report["passed"])
+        self.assertTrue(report["synthetic_fixture_executed"])
+        self.assertNotIn("synthetic_shortcut_roundtrip_readback", report["checks"])
+        self.assertEqual(len(report["checks"]), 6)
+        self.assertEqual(json.loads(path.read_text()), retained)
+        self.assertEqual(len(self.calls), 5)
+        self.assertEqual(self.uninstall_calls, 0)
+        self.assertFalse((self.root / "local/PrivacyBrowser/Profile-日本語").exists())
 
     def test_unexpected_success_on_invalid_marker_fails_closed(self):
         def permissive(*args):

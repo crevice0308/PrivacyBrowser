@@ -12,6 +12,7 @@ import ctypes
 from ctypes import wintypes
 import json
 import os
+import ntpath
 from pathlib import Path
 import subprocess
 
@@ -22,6 +23,17 @@ EXECUTION_RELATIVE = "installer-syntax/execution"
 EXECUTION_WINDOWS = r"D:\pb\installer-syntax\execution"
 FIXTURE_EXE = "NONPRODUCTION-synthetic-safety.exe"
 MARKER = "PrivacyBrowser.userdata-owner"
+SHORTCUT_OUTPUT = "installer-synthetic-shortcuts.json"
+SHORTCUT_MAX_BYTES = 1024 * 1024
+SHORTCUT_ROOT = EXECUTION_WINDOWS + r"\app\shortcut-probe"
+SHORTCUT_CASES = (("ascii", "PrivacyBrowser-ASCII", "ascii profile"),
+                  ("unicode", "PrivacyBrowser-日本語", "日本語 profile"),
+                  ("unicode-space", "PrivacyBrowser 日本語 Space", "日本語 space profile"))
+SHORTCUT_LINKS = (("direct", "direct.lnk", True),
+                  ("desktop-snapshot", "PrivacyBrowser.desktop-link", False),
+                  ("program-snapshot", "PrivacyBrowser.program-link", False),
+                  ("desktop-copy", r"relocated\desktop.lnk", True),
+                  ("program-copy", r"relocated\program.lnk", True))
 FILE_COUNT = 1500  # More than one 64-KiB FILE_FULL_DIR_INFO enumeration buffer.
 
 
@@ -120,6 +132,120 @@ def run_fixture(executable: Path, arguments: list[str], root: Path, environment:
                        stdout=log, stderr=subprocess.STDOUT, timeout=20, check=False)
         raise ValueError("Synthetic safety process timed out")
     return record["exit_code"]
+
+
+
+def validate_shortcut_readback(report: dict) -> None:
+    """Independently enforce the bounded fixed reader contract, never a fallback.
+
+    This validates retained observations; it does not emulate Windows COM or
+    count portable/model tests as actual Windows shortcut readback.
+    """
+    native.require(report.get("schema_version") == 1 and report.get("passed") is True
+                   and report.get("fixture_root") == SHORTCUT_ROOT and report.get("case_count") == 3,
+                   "Synthetic shortcut readback did not pass")
+    for name in ("browser_executed", "shortcut_executed", "resolve_called", "save_called",
+                 "production_installer_tested", "release_eligible"):
+        native.require(report.get(name) is False, "Unexpected synthetic shortcut execution/persistence claim")
+    native.require(report.get("get_path_flags") == 0 and report.get("persist_load_mode") == 0
+                   and report.get("error_type") is None and report.get("error_hresult") is None,
+                   "Unexpected synthetic shortcut reader mode/error")
+    cases = report.get("cases")
+    native.require(isinstance(cases, list) and len(cases) == len(SHORTCUT_CASES), "Missing shortcut cases")
+    for case, (case_id, folder, profile) in zip(cases, SHORTCUT_CASES):
+        native.require(isinstance(case, dict), "Invalid shortcut case")
+        directory = ntpath.join(SHORTCUT_ROOT, folder)
+        expected = {"target": ntpath.join(directory, "privacybrowser.exe"),
+                    "arguments": '-no-remote -profile "' + ntpath.join(SHORTCUT_ROOT, "profiles", profile) + '"',
+                    "icon": ntpath.join(directory, "reference.ico"), "icon_index": 0,
+                    "working_directory": directory}
+        native.require(case.get("id") == case_id and case.get("expected") == expected
+                       and case.get("passed") is True and case.get("copies_identical") is True
+                       and case.get("files_unchanged") is True and case.get("error_type") is None
+                       and case.get("error_hresult") is None, "Synthetic shortcut case failed")
+        links = case.get("links")
+        native.require(isinstance(links, list) and len(links) == len(SHORTCUT_LINKS), "Missing shortcut observations")
+        for link, (kind, relative, wsh_required) in zip(links, SHORTCUT_LINKS):
+            native.require(isinstance(link, dict), "Invalid shortcut observation")
+            before = link.get("sha256_before")
+            identity = link.get("identity_before")
+            native.require(link.get("kind") == kind and link.get("path") == ntpath.join(directory, relative)
+                           and link.get("passed") is True and link.get("wsh_required") is wsh_required
+                           and isinstance(link.get("bytes"), int) and 0 < link["bytes"] <= 65536
+                           and isinstance(before, str) and len(before) == 64
+                           and all(value in "0123456789abcdef" for value in before)
+                           and before == link.get("sha256_after")
+                           and isinstance(identity, str) and len(identity) == 26
+                           and identity == link.get("identity_after"), "Shortcut bytes or fixed identity changed")
+            wide = link.get("wide")
+            native.require(isinstance(wide, dict) and wide.get("load_mode") == 0 and wide.get("path_flags") == 0,
+                           "Missing explicit wide shortcut reader")
+            for name in ("load_hresult", "target_hresult", "arguments_hresult", "icon_hresult", "working_directory_hresult"):
+                native.require(type(wide.get(name)) is int and wide[name] == 0, "Wide shortcut HRESULT failed")
+            readers = [wide]
+            if wsh_required:
+                wsh = link.get("wsh")
+                native.require(isinstance(wsh, dict) and wsh.get("read_succeeded") is True,
+                               "WSH shortcut reader failed")
+                readers.append(wsh)
+            else:
+                native.require(link.get("wsh") is None, "WSH must not open custom-extension snapshots")
+            for actual in readers:
+                native.require(actual.get("strings_within_bound") is True and actual.get("error_type") is None
+                               and actual.get("error_hresult") is None, "Shortcut reader returned an error")
+                for name, value in expected.items():
+                    observed = actual.get(name)
+                    if name == "target":
+                        native.require(isinstance(observed, str) and observed.lower() == value.lower(),
+                                       "Shortcut target mismatch")
+                    else:
+                        native.require(type(observed) is type(value) and observed == value,
+                                       "Shortcut " + name + " mismatch")
+        for source, copied in ((1, 3), (2, 4)):
+            native.require(links[source]["sha256_before"] == links[copied]["sha256_before"]
+                           and links[source]["bytes"] == links[copied]["bytes"], "Shortcut copy mismatch")
+
+
+def run_shortcut_readback(work: Path, root: Path, environment: dict, log, commands: list[dict]) -> dict:
+    """Invoke only our fixed installed PowerShell reader, before destructive tests."""
+    require_host(work)
+    native.require(root == work / EXECUTION_RELATIVE, "Unexpected shortcut fixture root")
+    evidence = work / "evidence"
+    native.require(evidence.is_dir() and not native.is_link_or_reparse(evidence), "Unsafe shortcut evidence directory")
+    output = evidence / SHORTCUT_OUTPUT
+    native.require(not output.exists() and not output.is_symlink(), "Shortcut evidence must be new")
+    script = native.regular_file(Path(__file__).resolve().parent, "test_windows_shortcut_readback.ps1")
+    # The hosted Windows image supplies this engine; never download an engine,
+    # take a caller-supplied command, or change execution policy/profile settings.
+    engine = native.regular_file(Path(r"C:\Program Files\PowerShell\7"), "pwsh.exe")
+    command = [str(engine), "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(script)]
+    record = {"kind": "synthetic-shortcut-readback", "argv": command,
+              "script_sha256": native.digest(script), "exit_code": None, "evidence": None}
+    commands.append(record)
+    try:
+        result = subprocess.run(command, cwd=root, env=environment, stdout=log,
+                                stderr=subprocess.STDOUT, timeout=60, check=False)
+        record["exit_code"] = result.returncode
+        native.require(result.returncode == 0, "Synthetic shortcut readback failed; retain shortcut diagnostics")
+        native.require(output.is_file(), "Missing shortcut report")
+        path = native.regular_file(evidence, SHORTCUT_OUTPUT)
+        native.require(0 < path.stat().st_size <= SHORTCUT_MAX_BYTES, "Invalid shortcut report size")
+        report = json.loads(path.read_text(encoding="utf-8"))
+        native.require(isinstance(report, dict), "Invalid shortcut report")
+        validate_shortcut_readback(report)
+    except subprocess.TimeoutExpired:
+        record["timed_out"] = True
+        raise
+    finally:
+        # Failure output is evidence too. Do not discard or rewrite the report,
+        # or let an unsuccessful reader become a successful synthetic check.
+        if output.exists() and not native.is_link_or_reparse(output) and output.is_file():
+            size = output.stat().st_size
+            record["evidence"] = {"path": output.name, "bytes": size,
+                                  "sha256": native.digest(output) if size <= SHORTCUT_MAX_BYTES else None}
+            if size > SHORTCUT_MAX_BYTES:
+                record["evidence"]["oversized"] = True
+    return record["evidence"]
 
 
 def execute_synthetic(work: Path, compilation: dict) -> dict:
@@ -228,6 +354,8 @@ def execute_synthetic(work: Path, compilation: dict) -> dict:
                 expected = ("PrivacyBrowser-UserData-v1\r\n" + str(app) + "\r\n" + str(path) + "\r\n").encode("utf-16-le")
                 native.require((path / MARKER).read_bytes() == expected, "Synthetic Unicode owner marker mismatch")
             checks["ordinary_unicode_nt_open_and_owned_markers"] = True
+            report["shortcut_readback"] = run_shortcut_readback(work, root, environment, log, commands)
+            checks["synthetic_shortcut_roundtrip_readback"] = True
             nested = owned[0] / "Profile-日本語/nested"
             nested.mkdir(parents=True)
             for index in range(FILE_COUNT):

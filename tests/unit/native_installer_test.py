@@ -1012,12 +1012,13 @@ class NativeInstallerTemplateTests(unittest.TestCase):
                                     "create-fresh-application-directory", "set-application-output-path",
                                     "verify-application-current-directory",
                                     "ensure-owned-local-root", "ensure-owned-roaming-root",
-                                    "write-synthetic-uninstaller", "initialization-complete")),
+                                    "write-synthetic-uninstaller", "create-shortcut-roundtrip-fixtures", "initialization-complete")),
                                ("un.", ("uninstall-initialize-data-paths", "uninstall-lock-application",
                                         "uninstall-verify-local-root", "uninstall-verify-roaming-root",
                                         "uninstall-purge-owned-data", "uninstall-complete"))):
             self.assertEqual(re.findall(r'!insertmacro SyntheticPhase "' + re.escape(prefix) + r'" "([a-z-]+)"', fixture), list(phases))
-        self.assertLess(fixture.index('"ordinary-unicode-open"'), fixture.index("Call OpenNoReparse"))
+        main = fixture.split("Function NativeSafetyFixtureMain", 1)[1].split("FunctionEnd", 1)[0]
+        self.assertLess(main.index('"ordinary-unicode-open"'), main.index("Call OpenNoReparse"))
         self.assertLess(fixture.index('"initialize-data-paths"'), fixture.index("Call InitializeDataPaths"))
         self.assertLess(fixture.index('"uninstall-purge-owned-data"'), fixture.index("Call un.PurgeOwnedData"))
 
