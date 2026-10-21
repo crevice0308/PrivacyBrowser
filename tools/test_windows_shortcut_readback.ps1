@@ -2,6 +2,7 @@
 # No arguments, user paths, shell folders, registry, resolution, saving or launch.
 [CmdletBinding()]
 param()
+# Binding rejects undeclared inputs; reject bound common parameters below too.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $Root = 'D:\pb\installer-syntax\execution\app\shortcut-probe'
@@ -13,7 +14,7 @@ function Assert-True([bool]$Condition) {
     if (-not $Condition) { throw [InvalidOperationException]::new('Synthetic shortcut invariant failed.') }
 }
 Assert-True ($IsWindows -and $env:GITHUB_ACTIONS -ceq 'true' -and $env:RUNNER_ENVIRONMENT -ceq 'github-hosted')
-Assert-True ($args.Count -eq 0)
+Assert-True ($PSBoundParameters.Count -eq 0)
 
 # These are built-in Windows COM/.NET APIs only. Uncalled interface slots are
 # required to preserve the native vtable order; no setter is ever invoked.

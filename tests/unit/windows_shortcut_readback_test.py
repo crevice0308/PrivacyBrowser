@@ -1,7 +1,8 @@
-"""Portable structural/model/mocked-process tests, not real Windows COM results."""
+"""Structural/model/mocked-process and real preamble tests, not Windows COM results."""
 from copy import deepcopy
 import json
 import ntpath
+import os
 from pathlib import Path
 import re
 import shutil
@@ -215,6 +216,57 @@ class ShortcutReadbackRunnerTests(unittest.TestCase):
                 self.output.unlink()
 
 
+@unittest.skipUnless(shutil.which("pwsh"), "Real advanced-script startup/binding needs installed pwsh")
+class ShortcutReadbackStartupTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.preamble = Path(self.temp.name) / "shortcut-readback-preamble.ps1"
+        reader = (ROOT / "tools/test_windows_shortcut_readback.ps1").read_text(encoding="utf-8")
+        prefix, boundary, _ = reader.partition("Add-Type -TypeDefinition @'")
+        self.assertTrue(boundary)
+        # Execute the exact source preamble as a script, not a function/model.
+        # Keep its real host guard; omit all COM/native/file operations below it.
+        self.marker = "SHORTCUT_READBACK_PREAMBLE_COMPLETE"
+        self.preamble.write_text(prefix + "\nWrite-Output '" + self.marker + "'\n", encoding="utf-8")
+
+    @unittest.skipUnless(sys.platform == "win32" and os.environ.get("GITHUB_ACTIONS") == "true"
+                         and os.environ.get("RUNNER_ENVIRONMENT") == "github-hosted",
+                         "Zero-input preamble requires its genuine hosted Windows guard")
+    def test_zero_arguments_succeed_and_common_parameters_fail_real_preamble(self):
+        command = [shutil.which("pwsh"), "-NoLogo", "-NoProfile", "-NonInteractive",
+                   "-File", str(self.preamble)]
+        result = subprocess.run(command, cwd=self.temp.name,
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.strip(), self.marker)
+        for arguments in (["-Verbose"], ["-Debug:$false"], ["-ErrorAction", "Continue"]):
+            with self.subTest(arguments=arguments):
+                result = subprocess.run(command + arguments, cwd=self.temp.name,
+                                        capture_output=True, text=True, timeout=30)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn("Synthetic shortcut invariant failed.", result.stderr)
+                self.assertNotIn(self.marker, result.stdout)
+
+    def test_unexpected_arguments_fail_real_binding_before_script_body(self):
+        path = str(self.preamble).replace("'", "''")
+        for arguments, error_id in (("'unexpected'", "PositionalParameterNotFound"),
+                                    ("-Unexpected", "NamedParameterNotFound"),
+                                    ("-Root 'D:\\unexpected'", "NamedParameterNotFound"),
+                                    ("-Output 'D:\\unexpected.json'", "NamedParameterNotFound")):
+            with self.subTest(arguments=arguments):
+                # Catch only to expose the stable binding error ID, independent
+                # of localized error text. This still invokes the real .ps1.
+                script = ("try { & '" + path + "' " + arguments + "; exit 99 } catch { "
+                          "[Console]::Error.WriteLine($_.FullyQualifiedErrorId); exit 1 }")
+                result = subprocess.run([shutil.which("pwsh"), "-NoLogo", "-NoProfile", "-NonInteractive",
+                                         "-Command", script], cwd=self.temp.name,
+                                        capture_output=True, text=True, timeout=30)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertEqual(result.stderr.strip().split(",", 1)[0], error_id)
+                self.assertNotIn(self.marker, result.stdout)
+
+
 class ShortcutReadbackStructureTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -258,11 +310,14 @@ if ($decoded.load_hresult -ne 0 -or $decoded.target -ine $expected.target) { thr
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_fixed_hosted_only_paths_no_inputs_or_launch_persistence(self):
-        for expected in ("param()", "$args.Count -eq 0", "$IsWindows", "$env:GITHUB_ACTIONS -ceq 'true'",
+        for expected in ("[CmdletBinding()]", "param()", "Set-StrictMode -Version Latest",
+                         "$PSBoundParameters.Count -eq 0",
+                         "$IsWindows", "$env:GITHUB_ACTIONS -ceq 'true'",
                          "$env:RUNNER_ENVIRONMENT -ceq 'github-hosted'", synthetic.SHORTCUT_ROOT,
                          r"D:\pb\evidence\installer-synthetic-shortcuts.json", "[IO.FileMode]::CreateNew",
                          "[IO.FileShare]::None", "$bytes.Length -le $MaxReportBytes"):
             self.assertIn(expected, self.commands)
+        self.assertNotIn("$args", self.commands)
         for forbidden in ("Start-Process", "Invoke-Expression", "ShellExecute", "Resolve(", "Save(",
                           "$env:APPDATA", "$env:LOCALAPPDATA", "HKCU:", "HKLM:", "Remove-Item"):
             self.assertNotIn(forbidden, self.commands)
