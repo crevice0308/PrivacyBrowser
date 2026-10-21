@@ -17,6 +17,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
 import windows_native_evidence as workflow
+from shortcut_evidence_fixtures import attach_shortcut_report
 
 
 class NativeWorkflowTests(unittest.TestCase):
@@ -479,9 +480,9 @@ class NativeWorkflowTests(unittest.TestCase):
         self.assertLess(stage.index(validation), stage.index("output.mkdir()"))
 
     def installer_report(self):
-        return {"schema_version": 1, "passed": True, "installer_sha256": "a" * 64,
+        return attach_shortcut_report({"schema_version": 1, "passed": True, "installer_sha256": "a" * 64,
                 "native_binary_sha256": "b" * 64, "release_eligible": False,
-                "checks": {key: True for key in workflow.REQUIRED_INSTALLER_CHECKS}}
+                "checks": {key: True for key in workflow.REQUIRED_INSTALLER_CHECKS}})
 
     def test_installer_gate_accepts_all_exact_true_scenarios(self):
         workflow.validate_installer_test(self.installer_report(), "a" * 64, "b" * 64)

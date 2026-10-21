@@ -1,6 +1,7 @@
 """Structural/model/mocked-process and real preamble tests, not Windows COM results."""
 from copy import deepcopy
 import json
+import hashlib
 import ntpath
 import os
 from pathlib import Path
@@ -15,11 +16,14 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
 import test_native_installer_synthetic as synthetic
+import windows_shortcut_evidence as shortcuts
+from shortcut_evidence_fixtures import actual_shortcut_report, attach_shortcut_report
 
 
 def model_report():
     """Authored observation model only; must never be presented as COM evidence."""
-    report = {"schema_version": 1, "passed": True, "fixture_root": synthetic.SHORTCUT_ROOT,
+    report = {"schema_version": 2, "passed": True, "fixture_root": synthetic.SHORTCUT_ROOT,
+              "authoritative_reader": "IShellLinkW", "wsh_role": "non-authoritative diagnostic",
               "case_count": 3, "cases": [], "get_path_flags": 0, "persist_load_mode": 0,
               "error_type": None, "error_hresult": None}
     for name in ("browser_executed", "shortcut_executed", "resolve_called", "save_called",
@@ -39,18 +43,18 @@ def model_report():
                        for kind, relative, wsh in synthetic.SHORTCUT_LINKS]
         fixed_links += [(kind, ntpath.join(ascii_directory, relative), wsh)
                         for kind, relative, wsh in synthetic.SHORTCUT_ASCII_LINKS]
-        for kind, path, wsh_required in fixed_links:
+        for kind, path, wsh_observed in fixed_links:
             wide = {**expected, "load_mode": 0, "path_flags": 0, "strings_within_bound": True,
                     "error_type": None, "error_hresult": None}
             for name in ("load_hresult", "target_hresult", "arguments_hresult", "icon_hresult", "working_directory_hresult"):
                 wide[name] = 0
             wsh = {**expected, "strings_within_bound": True, "read_succeeded": True,
                    "error_type": None, "error_hresult": None, "icon_location": expected["icon"] + ",0"}
-            case["links"].append({"kind": kind, "path": path, "bytes": 256,
+            case["links"].append({"kind": kind, "path": path, "bytes": 256, "bytes_after": 256,
                                   "sha256_before": "a" * 64, "sha256_after": "a" * 64,
                                   "identity_before": "11111111:00000000:00000001", "identity_after": "11111111:00000000:00000001",
-                                  "wide": wide, "wsh": wsh if wsh_required else None,
-                                  "wsh_required": wsh_required, "passed": True})
+                                  "wide": wide, "wsh": wsh if wsh_observed else None,
+                                  "wsh_observed": wsh_observed, "passed": True})
         report["cases"].append(case)
     return report
 
@@ -73,11 +77,11 @@ class ShortcutReadbackModelTests(unittest.TestCase):
                 for link, leaf in zip(case["links"][5:], ("desktop.lnk", "program.lnk")):
                     self.assertEqual(link["path"], fixed + "\\" + leaf)
                     self.assertTrue(link["path"].isascii())
-                    self.assertTrue(link["wsh_required"])
-                    for reader in ("wide", "wsh"):
+                    self.assertTrue(link["wsh_observed"])
+                    for reader in ("wide",):
                         for field, value in case["expected"].items():
                             self.assertEqual(link[reader][field], value)
-                self.assertEqual(sum(link["wsh_required"] for link in case["links"]), 5)
+                self.assertEqual(sum(link["wsh_observed"] for link in case["links"]), 5)
 
     def test_ascii_controls_reject_unfixed_unicode_or_cross_case_paths(self):
         for index in (5, 6):
@@ -99,9 +103,9 @@ class ShortcutReadbackModelTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             synthetic.validate_shortcut_readback(report)
 
-    def test_ascii_controls_require_both_readers_and_unchanged_bytes(self):
+    def test_ascii_controls_require_wide_reader_and_unchanged_bytes(self):
         for index in (5, 6):
-            for reader in ("wide", "wsh"):
+            for reader in ("wide",):
                 for field, value in (("target", ""), ("arguments", "wrong"), ("icon", ""),
                                      ("icon_index", 1), ("working_directory", "wrong")):
                     report = model_report()
@@ -109,7 +113,7 @@ class ShortcutReadbackModelTests(unittest.TestCase):
                     with self.subTest(index=index, reader=reader, field=field), self.assertRaises(ValueError):
                         synthetic.validate_shortcut_readback(report)
             for field, value in (("sha256_after", "b" * 64), ("bytes", 255),
-                                 ("identity_after", "11111111:00000000:00000002"), ("wsh_required", False)):
+                                 ("identity_after", "11111111:00000000:00000002"), ("wsh_observed", False)):
                 report = model_report()
                 report["cases"][2]["links"][index][field] = value
                 with self.subTest(index=index, field=field), self.assertRaises(ValueError):
@@ -120,7 +124,7 @@ class ShortcutReadbackModelTests(unittest.TestCase):
         links = report["cases"][1]["links"]
         for indices, digest, size in (((1, 3, 5), "d" * 64, 251), ((2, 4, 6), "e" * 64, 252)):
             for index in indices:
-                links[index].update(sha256_before=digest, sha256_after=digest, bytes=size)
+                links[index].update(sha256_before=digest, sha256_after=digest, bytes=size, bytes_after=size)
         synthetic.validate_shortcut_readback(report)
         for index in (5, 6):
             for field in ("hash", "bytes"):
@@ -130,21 +134,24 @@ class ShortcutReadbackModelTests(unittest.TestCase):
                 if field == "hash":
                     link.update(sha256_before=wrong["sha256_before"], sha256_after=wrong["sha256_after"])
                 else:
-                    link["bytes"] = wrong["bytes"]
+                    link["bytes"] = link["bytes_after"] = wrong["bytes"]
                 with self.subTest(index=index, field=field), self.assertRaisesRegex(ValueError, "copy mismatch"):
                     synthetic.validate_shortcut_readback(changed)
 
-    def test_successful_ascii_controls_do_not_hide_original_unicode_wsh_failure(self):
+    def test_known_unicode_wsh_loss_is_retained_but_not_authoritative(self):
         for case_index in (1, 2):
             for link_index in (0, 3, 4):
                 report = model_report()
                 report["cases"][case_index]["links"][link_index]["wsh"].update(
                     target="", arguments="", icon="", working_directory="")
-                with self.subTest(case=case_index, link=link_index), self.assertRaises(ValueError):
+                with self.subTest(case=case_index, link=link_index):
                     synthetic.validate_shortcut_readback(report)
+                    report["cases"][case_index]["links"][link_index]["wide"]["target"] = ""
+                    with self.assertRaises(ValueError):
+                        synthetic.validate_shortcut_readback(report)
 
     def test_target_case_matches_existing_real_gate_but_aliases_do_not(self):
-        for reader in ("wide", "wsh"):
+        for reader in ("wide",):
             report = model_report()
             report["cases"][1]["links"][0][reader]["target"] = report["cases"][1]["expected"]["target"].upper()
             synthetic.validate_shortcut_readback(report)
@@ -153,8 +160,8 @@ class ShortcutReadbackModelTests(unittest.TestCase):
                     report["cases"][1]["links"][0][reader]["target"] = value
                     synthetic.validate_shortcut_readback(report)
 
-    def test_neither_wsh_nor_wide_can_be_ignored_or_fallback_to_the_other(self):
-        for reader in ("wide", "wsh"):
+    def test_wide_failure_never_falls_back_to_successful_wsh(self):
+        for reader in ("wide",):
             for field, value in (("arguments", "wrong"), ("icon", "wrong"), ("icon_index", 1),
                                  ("working_directory", "wrong"), ("error_type", "COMException"),
                                  ("error_hresult", -1), ("strings_within_bound", False)):
@@ -210,7 +217,7 @@ class ShortcutReadbackModelTests(unittest.TestCase):
             lambda r: r["cases"][1].update(expected=r["cases"][0]["expected"]),
             lambda r: r["cases"][1]["links"][1].update(path=r"C:\elsewhere.lnk"),
             lambda r: r["cases"][1].update(links=r["cases"][1]["links"][:4]),
-            lambda r: r["cases"][0]["links"][0]["wsh"].update(read_succeeded=False),
+            lambda r: r["cases"][0]["links"][0].update(wsh=None),
         )
         for mutate in mutations:
             report = model_report()
@@ -313,7 +320,7 @@ class ShortcutReadbackStartupTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.preamble = Path(self.temp.name) / "shortcut-readback-preamble.ps1"
         reader = (ROOT / "tools/test_windows_shortcut_readback.ps1").read_text(encoding="utf-8")
-        prefix, boundary, _ = reader.partition("Add-Type -TypeDefinition @'")
+        prefix, boundary, _ = reader.partition("# One shared authoritative reader")
         self.assertTrue(boundary)
         # Execute the exact source preamble as a script, not a function/model.
         # Keep its real host guard; omit all COM/native/file operations below it.
@@ -361,6 +368,7 @@ class ShortcutReadbackStructureTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.reader = (ROOT / "tools/test_windows_shortcut_readback.ps1").read_text(encoding="utf-8")
+        cls.shared = (ROOT / "tools/windows_shortcut_reader.ps1").read_text(encoding="utf-8")
         cls.fixture = (ROOT / "packaging/windows/native-safety-fixture.nsh").read_text(encoding="utf-8")
         cls.commands = "\n".join(line for line in cls.reader.splitlines() if not line.lstrip().startswith(("#", "//")))
 
@@ -370,30 +378,74 @@ class ShortcutReadbackStructureTests(unittest.TestCase):
         # declarations only, then test pure comparisons with authored fields.
         # No host guard is bypassed and no Windows/COM/filesystem method runs.
         path = str(ROOT / "tools/test_windows_shortcut_readback.ps1").replace("'", "''")
-        declarations = self.reader.split("Add-Type -TypeDefinition @'", 1)[1].split("\n'@", 1)[0]
-        helpers = self.reader[self.reader.index("function Bounded-String"):self.reader.index("$report = [ordered]@{")]
+        shared_path = str(ROOT / "tools/windows_shortcut_reader.ps1").replace("'", "''")
         script = "$ErrorActionPreference = 'Stop'\nSet-StrictMode -Version Latest\n" + r"""
 $tokens = $null
 $parseErrors = $null
 $null = [Management.Automation.Language.Parser]::ParseFile('""" + path + r"""', [ref]$tokens, [ref]$parseErrors)
 if ($parseErrors.Count -ne 0) { throw ($parseErrors | Out-String) }
-""" + "Add-Type -TypeDefinition @'" + declarations + "\n'@\n" + helpers + r"""
+""" + ". '" + shared_path + "'\n" + r"""
 $expected = @{ target = 'D:\fixed\日本語 Space\privacybrowser.exe'; arguments = '-profile "D:\fixed\profile"';
                icon = 'D:\fixed\reference.ico'; icon_index = 0; working_directory = 'D:\fixed\日本語 Space' }
-$actual = [PrivacyBrowserSynthetic.WideResult]::new()
+$actual = [PrivacyBrowserShortcut.WideResult]::new()
 foreach ($name in $expected.Keys) { $actual.$name = $expected[$name] }
-$actual.load_hresult = 0
-if (-not (Matches-Expected $actual $expected)) { throw 'Matching model failed.' }
+foreach ($name in @('load_hresult', 'target_hresult', 'arguments_hresult', 'icon_hresult', 'working_directory_hresult')) { $actual.$name = 0 }
+if (-not (Test-WideShortcut $actual $expected)) { throw 'Matching model failed.' }
 $actual.target = $actual.target.ToUpperInvariant()
-if (-not (Matches-Expected $actual $expected)) { throw 'Case-insensitive target model failed.' }
+if (-not (Test-WideShortcut $actual $expected)) { throw 'Case-insensitive target model failed.' }
 $actual.arguments = 'wrong'
-if (Matches-Expected $actual $expected) { throw 'Wrong arguments model passed.' }
+if (Test-WideShortcut $actual $expected) { throw 'Wrong arguments model passed.' }
 $actual.arguments = $expected.arguments
 $actual.error_type = 'SyntheticFailure'
-if (Matches-Expected $actual $expected) { throw 'Error model passed.' }
+if (Test-WideShortcut $actual $expected) { throw 'Error model passed.' }
+$actual.error_type = $null
+foreach ($field in @('load_hresult', 'target_hresult', 'arguments_hresult', 'icon_hresult', 'working_directory_hresult')) {
+    foreach ($value in @($null, 1, -1)) {
+        $actual.$field = $value
+        if (Test-WideShortcut $actual $expected) { throw "Invalid HRESULT passed: $field" }
+    }
+    $actual.$field = 0
+}
+foreach ($field in @('target', 'arguments', 'icon', 'working_directory')) {
+    foreach ($value in @($null, '', 'wrong', ('x' * 1025))) {
+        $actual.$field = $value
+        if (Test-WideShortcut $actual $expected) { throw "Invalid string passed: $field" }
+    }
+    $actual.$field = $expected[$field]
+}
+$actual.icon_index = 1
+if (Test-WideShortcut $actual $expected) { throw 'Wrong icon index passed.' }
+$actual.icon_index = 0
+$actual.strings_within_bound = $false
+if (Test-WideShortcut $actual $expected) { throw 'Truncated read passed.' }
+$actual.strings_within_bound = $true
+foreach ($field in @('load_mode', 'path_flags')) {
+    $actual.$field = 1
+    if (Test-WideShortcut $actual $expected) { throw 'Wrong reader flags passed.' }
+    $actual.$field = 0
+}
+$actual.error_hresult = -1
+if (Test-WideShortcut $actual $expected) { throw 'Reader error passed.' }
+$actual.error_hresult = $null
+if (-not (Test-WideShortcut $actual $expected)) { throw 'Restored model failed.' }
 $encoded = $actual | ConvertTo-Json -Compress
 $decoded = $encoded | ConvertFrom-Json
 if ($decoded.load_hresult -ne 0 -or $decoded.target -ine $expected.target) { throw 'Public-field serialization failed.' }
+# Pure mock: no real WSH/COM/file operation. Cleanup of a non-COM authored
+# object intentionally throws and must remain a bounded non-authoritative observation.
+$script:FakeShortcut = [pscustomobject]@{ TargetPath = $expected.target; Arguments = $expected.arguments;
+    IconLocation = $expected.icon + ',0'; WorkingDirectory = $expected.working_directory }
+$script:FakeShell = [pscustomobject]@{}
+$script:FakeShell | Add-Member -MemberType ScriptMethod -Name CreateShortcut -Value { param($Path) return $script:FakeShortcut }
+function New-Object([string]$ComObject) {
+    if ($ComObject -cne 'WScript.Shell') { throw 'Unexpected mocked COM class.' }
+    return $script:FakeShell
+}
+$diagnostic = Read-Wsh 'D:\authored-placeholder.lnk'
+if ($diagnostic.target -cne $expected.target -or $null -eq $diagnostic.error_type -or $diagnostic.read_succeeded) {
+    throw 'WSH cleanup failure was not retained as diagnostic data.'
+}
+if (-not (Test-WideShortcut $actual $expected)) { throw 'Diagnostic failure overrode wide success.' }
 """
         result = subprocess.run([shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-Command", script],
                                 capture_output=True, text=True, timeout=30)
@@ -417,20 +469,21 @@ if ($decoded.load_hresult -ne 0 -or $decoded.target -ine $expected.target) { thr
         self.assertLess(self.reader.index("$outputStream.Write"), self.reader.index("exit $exitCode"))
 
     def test_explicit_wide_vtables_and_read_only_calls_are_not_ansi_or_resolving(self):
-        self.assertIn('Guid("000214F9-0000-0000-C000-000000000046")', self.reader)
-        self.assertIn('Guid("0000010B-0000-0000-C000-000000000046")', self.reader)
-        self.assertIn('new Guid("00021401-0000-0000-C000-000000000046")', self.reader)
-        interface = self.reader.split("interface IShellLinkW {", 1)[1].split("\n    }", 1)[0]
+        self.assertIn('Guid("000214F9-0000-0000-C000-000000000046")', self.shared)
+        self.assertIn('Guid("0000010B-0000-0000-C000-000000000046")', self.shared)
+        self.assertIn('new Guid("00021401-0000-0000-C000-000000000046")', self.shared)
+        interface = self.shared.split("interface IShellLinkW {", 1)[1].split("\n    }", 1)[0]
         self.assertEqual(re.findall(r"\[PreserveSig\] int (\w+)\(", interface),
                          ["GetPath", "GetIDList", "SetIDList", "GetDescription", "SetDescription", "GetWorkingDirectory",
                           "SetWorkingDirectory", "GetArguments", "SetArguments", "GetHotkey", "SetHotkey",
                           "GetShowCmd", "SetShowCmd", "GetIconLocation"])
-        persist = self.reader.split("interface IPersistFileRead {", 1)[1].split("\n    }", 1)[0]
+        persist = self.shared.split("interface IPersistFileRead {", 1)[1].split("\n    }", 1)[0]
         self.assertEqual(re.findall(r"\[PreserveSig\] int (\w+)\(", persist), ["GetClassID", "IsDirty", "Load"])
-        self.assertIn("persist.Load(path, 0)", self.reader)
-        self.assertIn("link.GetPath(text, text.Capacity, IntPtr.Zero, 0)", self.reader)
-        self.assertIn("$shell.CreateShortcut($Path)", self.reader)
-        self.assertIn("$link.passed = $wideOk -and $wshOk", self.reader)
+        self.assertIn("persist.Load(path, 0)", self.shared)
+        self.assertIn("link.GetPath(text, text.Capacity, IntPtr.Zero, 0)", self.shared)
+        self.assertIn("$shell.CreateShortcut($Path)", self.shared)
+        self.assertIn("$link.passed = Test-WideShortcut $link.wide $case.expected", self.reader)
+        self.assertNotIn("$wshOk", self.reader)
 
     def test_safe_read_pins_bounds_hashes_and_all_fixed_cases(self):
         for case_id, folder, profile in synthetic.SHORTCUT_CASES:
@@ -438,16 +491,18 @@ if ($decoded.load_hresult -ne 0 -or $decoded.target -ine $expected.target) { thr
             self.assertIn(profile, self.reader)
             self.assertIn('!insertmacro SyntheticShortcutCase "' + case_id + '" "' + folder + '" "' + profile + '"', self.fixture)
         for guard in ("0x02200000", "0x00200000", "(info.Attributes & 0x410)", "info.Links != 1",
-                      "info.SizeLow > 65536", "const int Limit = 1024", "$MaxReportBytes = 1048576"):
-            self.assertIn(guard, self.reader)
+                      "info.SizeLow > 65536", "GetFileType(handle) != 1", "const int Limit = 1024"):
+            self.assertIn(guard, self.shared)
         self.assertIn("sha256_before", self.reader)
         self.assertIn("sha256_after", self.reader)
         self.assertIn("identity_before", self.reader)
         self.assertIn("identity_after", self.reader)
-        self.assertIn("CreateFileW(path, 0x81, 3,", self.reader)
-        self.assertIn("using (var stream = PinFile(path))", self.reader)
-        self.assertNotIn("$files.Add", self.reader)
-        self.assertIn("before any COM load", self.reader)
+        self.assertIn("CreateFileW(path, 0x81, 3,", self.shared)
+        self.assertIn("using (var stream = PinFile(path))", self.shared)
+        self.assertLess(self.shared.index("$handle = [PrivacyBrowserShortcut.FileSafety]::PinDirectory"),
+                        self.shared.index("[void]$Pinned.Add"))
+        self.assertNotIn("$files.Add", self.shared)
+        self.assertIn("before any COM load", self.shared)
         self.assertIn("$case.links[1].sha256_before -ceq $case.links[3].sha256_before", self.reader)
         self.assertIn("$case.links[2].sha256_before -ceq $case.links[4].sha256_before", self.reader)
         self.assertIn("A passing probe does not explain the earlier real installer failure", self.reader)
@@ -455,9 +510,9 @@ if ($decoded.load_hresult -ne 0 -or $decoded.target -ine $expected.target) { thr
     def test_fixed_ascii_copy_directories_are_pinned_and_checks_are_additive(self):
         self.assertIn("$asciiCopyRoot = $Root + '\\ascii-link-copies-' + $definition.id", self.reader)
         self.assertIn("Assert-True ($asciiCopyRoot -cmatch '^[\\x00-\\x7f]+$')", self.reader)
-        pin = "$directories.Add([PrivacyBrowserSynthetic.FileSafety]::PinDirectory($asciiCopyRoot))"
+        pin = "$directories.Add([PrivacyBrowserShortcut.FileSafety]::PinDirectory($asciiCopyRoot))"
         self.assertIn(pin, self.reader)
-        self.assertLess(self.reader.index(pin), self.reader.index("$before = [PrivacyBrowserSynthetic.FileSafety]::ObserveFile($path)"))
+        self.assertLess(self.reader.index(pin), self.reader.index("$before = [PrivacyBrowserShortcut.FileSafety]::ObserveFile($path)"))
         self.assertIn("$entries += $asciiEntries", self.reader)
         for kind, leaf, _ in synthetic.SHORTCUT_ASCII_LINKS:
             self.assertIn("@{ kind = '" + kind + "'; relative = '" + leaf + "'; wsh = $true }", self.reader)
@@ -498,6 +553,170 @@ if ($decoded.load_hresult -ne 0 -or $decoded.target -ine $expected.target) { thr
         for forbidden in ("$DESKTOP", "$SMPROGRAMS", "$APPDATA", "$LOCALAPPDATA", "ExecShell", "ExecWait", "WriteReg"):
             self.assertNotIn(forbidden, self.fixture)
         self.assertIn("absence-check/write race", self.fixture)
+
+
+
+class ActualShortcutEvidenceTests(unittest.TestCase):
+    def test_exact_model_and_lossy_diagnostics_pass_only_with_wide_success(self):
+        report = actual_shortcut_report()
+        for link in report["links"][:2]:
+            link["wsh"].update(target="???", arguments="", icon="???", working_directory="???",
+                               read_succeeded=False, error_type="System.InvalidOperationException", error_hresult=-1)
+        shortcuts.validate_actual(report, "a" * 64, "b" * 64)
+        for field in (*shortcuts.FIELDS, "icon_index", *shortcuts.HRESULTS):
+            changed = deepcopy(report)
+            changed["links"][0]["wide"][field] = "" if field in shortcuts.FIELDS else 1
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                shortcuts.validate_actual(changed, "a" * 64, "b" * 64)
+
+    def test_every_link_rejects_malformed_error_empty_wrong_hash_identity_and_flags(self):
+        for index in range(4):
+            mutations = [("wide", None), ("passed", False), ("bytes_after", 0), ("bytes", True),
+                         ("sha256_after", "d" * 64), ("identity_after", "11111111:00000000:00000002"),
+                         ("identity_before", "invalid"), ("error_type", "contradictory"), ("error_hresult", -1), ("path", r"C:\other.lnk"), ("kind", "wrong")]
+            mutations += [("wide." + field, value) for field in shortcuts.HRESULTS for value in (None, False, 1, -1, "0")]
+            mutations += [("wide." + field, value) for field in shortcuts.FIELDS for value in (None, "", "wrong", "x" * 1025)]
+            mutations += [("wide." + field, value) for field, value in (("icon_index", True), ("load_mode", False),
+                          ("path_flags", 1), ("error_type", "error"), ("error_hresult", -1), ("strings_within_bound", False))]
+            for field, value in mutations:
+                report = actual_shortcut_report()
+                target = report["links"][index]
+                if field.startswith("wide."):
+                    target = target["wide"]
+                    field = field[5:]
+                target[field] = value
+                with self.subTest(index=index, field=field, value=value), self.assertRaises(ValueError):
+                    shortcuts.validate_actual(report, "a" * 64, "b" * 64)
+
+    def test_expected_fields_cannot_self_authorize_wrong_installation_or_arguments(self):
+        for field in (*shortcuts.FIELDS, "icon_index"):
+            report = actual_shortcut_report()
+            value = 1 if field == "icon_index" else "wrong"
+            report["expected"][field] = value
+            for link in report["links"]:
+                link["wide"][field] = value
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                shortcuts.validate_actual(report, "a" * 64, "b" * 64)
+        for field, value in (("install_directory", r"D:\other"), ("installer_sha256", "d" * 64),
+                             ("native_binary_sha256", "d" * 64), ("copies_identical", False),
+                             ("files_unchanged", False), ("authoritative_reader", "WSH"), ("schema_version", True)):
+            report = actual_shortcut_report()
+            report[field] = value
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                shortcuts.validate_actual(report, "a" * 64, "b" * 64)
+
+    def test_wrong_snapshot_copy_and_invalid_known_folder_bases_fail(self):
+        report = actual_shortcut_report()
+        report["links"][2].update(sha256_before="e" * 64, sha256_after="e" * 64)
+        with self.assertRaisesRegex(ValueError, "snapshot mismatch"):
+            shortcuts.validate_actual(report, "a" * 64, "b" * 64)
+        for value in ("", "C:relative", r"\\server\share", r"\\?\C:\Users\fixture", r"C:\a\..\b", r"C:\a\\b",
+                      r"C:\a\name:stream", 'C:\\bad"quote', "C:\\bad?wildcard", "C:\\bad\ncontrol", "C:\\bad.\\folder", "C:/Users/fixture", "x" * 1025):
+            report = actual_shortcut_report()
+            report["known_folders"]["desktop"] = value
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                shortcuts.validate_actual(report, "a" * 64, "b" * 64)
+
+    def test_missing_or_unbounded_wsh_is_not_retained_diagnostic(self):
+        for mutation in (None, {}, {"read_succeeded": True, "strings_within_bound": True, "target": "x" * 1025}):
+            report = actual_shortcut_report()
+            report["links"][0]["wsh"] = mutation
+            with self.assertRaises(ValueError):
+                shortcuts.validate_actual(report, "a" * 64, "b" * 64)
+
+    def test_retained_json_is_hash_bound_and_cannot_disagree_with_nested_report(self):
+        outer = attach_shortcut_report({"installer_sha256": "a" * 64, "native_binary_sha256": "b" * 64})
+        binding, report = outer["shortcut_readback_evidence"], outer["shortcut_readback"]
+        shortcuts.validate_binding(binding, report)
+        for field, value in (("json", "{}"), ("sha256", "f" * 64), ("bytes", 1), ("bytes", True),
+                             ("path", "other.json")):
+            changed = dict(binding, **{field: value})
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                shortcuts.validate_binding(changed, report)
+        with self.assertRaises(ValueError):
+            shortcuts.validate_binding(binding, dict(report, passed=False))
+        for field, value in (("load_hresult", False), ("target_hresult", 0.0), ("path_flags", False)):
+            malformed = deepcopy(report)
+            malformed["links"][0]["wide"][field] = value
+            raw = json.dumps(malformed)
+            changed = dict(binding, json=raw, bytes=len(raw.encode("utf-8")),
+                           sha256=hashlib.sha256(raw.encode("utf-8")).hexdigest())
+            with self.subTest(raw_field=field, value=value), self.assertRaises(ValueError):
+                shortcuts.validate_binding(changed, report)
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            with self.assertRaises((ValueError, OSError)):
+                shortcuts.validate_binding(binding, report, root)
+            (root / shortcuts.ACTUAL_REPORT).write_text("wrong")
+            with self.assertRaises((ValueError, OSError)):
+                shortcuts.validate_binding(binding, report, root)
+            (root / shortcuts.ACTUAL_REPORT).write_bytes(binding["json"].encode("utf-8"))
+            shortcuts.validate_binding(binding, report, root)
+
+    def test_actual_and_synthetic_use_same_authority_and_retain_before_assertions(self):
+        actual = (ROOT / "tools/test_native_installer.ps1").read_text()
+        synthetic_reader = (ROOT / "tools/test_windows_shortcut_readback.ps1").read_text()
+        for source in (actual, synthetic_reader):
+            self.assertIn(". (Join-Path $PSScriptRoot 'windows_shortcut_reader.ps1')", source)
+            self.assertIn("[PrivacyBrowserShortcut.LinkReader]::Read", source)
+            self.assertIn("Test-WideShortcut", source)
+            self.assertNotIn("$shell.CreateShortcut", source)
+        section = actual[actual.index("$shortcutOutput = "):actual.index("$checks.native_shortcuts = $true")]
+        self.assertIn("[IO.FileMode]::CreateNew", section)
+        self.assertIn("[IO.FileShare]::None", section)
+        self.assertIn("Pin-ShortcutParents", section)
+        self.assertIn("::EqualFiles", section)
+        self.assertIn("$shortcutBytes.Length -le 1048576", section)
+        self.assertLess(section.index("$shortcutStream.Write"), section.index("Assert-True ($shortcutReport.passed)"))
+        self.assertIn("shortcut_readback = $shortcutReport", actual)
+        self.assertIn("shortcut_readback_evidence = $shortcutBinding", actual)
+
+
+@unittest.skipUnless(sys.platform == "win32" and shutil.which("pwsh")
+                     and os.environ.get("GITHUB_ACTIONS") == "true"
+                     and os.environ.get("RUNNER_ENVIRONMENT") == "github-hosted",
+                     "Real shared COM/file-safety negatives require ephemeral hosted Windows and pwsh")
+class SharedShortcutNativeNegativeTests(unittest.TestCase):
+    def test_missing_empty_corrupt_and_nonregular_paths_fail_without_launch(self):
+        with tempfile.TemporaryDirectory(prefix="privacybrowser-shortcut-negative-") as temp:
+            root = Path(temp)
+            (root / "empty.lnk").write_bytes(b"")
+            (root / "corrupt.lnk").write_bytes(b"not a Shell link" * 16)
+            (root / "copy.lnk").write_bytes((root / "corrupt.lnk").read_bytes())
+            (root / "directory.lnk").mkdir()
+            shared = str(ROOT / "tools/windows_shortcut_reader.ps1").replace("'", "''")
+            folder = str(root).replace("'", "''")
+            script = "$ErrorActionPreference = 'Stop'\nSet-StrictMode -Version Latest\n. '" + shared + "'\n$root = '" + folder + "'\n" + r'''
+$expected = @{ target = 'D:\fixed\privacybrowser.exe'; arguments = '-profile "D:\fixed\Profile"';
+               icon = 'D:\fixed\icon.ico'; icon_index = 0; working_directory = 'D:\fixed' }
+foreach ($name in @('missing.lnk', 'empty.lnk', 'corrupt.lnk', 'directory.lnk')) {
+    $result = [PrivacyBrowserShortcut.LinkReader]::Read((Join-Path $root $name))
+    if (Test-WideShortcut $result $expected) { throw "Invalid Shell link passed: $name" }
+}
+foreach ($name in @('missing.lnk', 'empty.lnk', 'directory.lnk')) {
+    $rejected = $false
+    try { $null = [PrivacyBrowserShortcut.FileSafety]::ObserveFile((Join-Path $root $name)) }
+    catch { $rejected = $true }
+    if (-not $rejected) { throw "Invalid regular file passed: $name" }
+}
+$left = Join-Path $root 'corrupt.lnk'
+$right = Join-Path $root 'copy.lnk'
+$before = [PrivacyBrowserShortcut.FileSafety]::ObserveFile($left)
+$null = [PrivacyBrowserShortcut.LinkReader]::Read($left)
+$after = [PrivacyBrowserShortcut.FileSafety]::ObserveFile($left)
+if ($before.identity -cne $after.identity -or $before.sha256 -cne $after.sha256 -or $before.bytes -ne $after.bytes) {
+    throw 'Read changed corrupt fixture.'
+}
+if (-not [PrivacyBrowserShortcut.FileSafety]::EqualFiles($left, $right)) { throw 'Equal bytes failed.' }
+# Mutate only this newly authored negative fixture, never a browser/profile/link from a user.
+$changed = [IO.File]::ReadAllBytes($right)
+$changed[0] = $changed[0] -bxor 1
+[IO.File]::WriteAllBytes($right, $changed)
+if ([PrivacyBrowserShortcut.FileSafety]::EqualFiles($left, $right)) { throw 'Changed bytes passed.' }
+'''
+            result = subprocess.run([shutil.which("pwsh"), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
+                                    capture_output=True, text=True, timeout=45)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
 if __name__ == "__main__":

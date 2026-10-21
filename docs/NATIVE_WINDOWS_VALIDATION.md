@@ -205,9 +205,16 @@ full-build job after quality and synthetic validation. It exercises inert
 ASCII/Unicode shortcut targets entirely inside the isolated fixture root,
 without executing links or targets or changing Desktop/Start Menu entries.
 Bounded readback evidence distinguishes explicit wide ShellLink retrieval from
-WScript retrieval, and direct links from copied ownership snapshots. Exact
-target, argument and icon checks are not relaxed. Even a successful synthetic
-round trip does not explain the previous real-installation mismatch by itself.
+WScript retrieval, and direct links from copied ownership snapshots. The
+[ASCII-path control run](https://github.com/crevice0308/PrivacyBrowser/actions/runs/39694415558)
+showed WScript replacing Japanese target/argument/icon text with question marks
+while explicit `IShellLinkW` recovered the exact fields from unchanged bytes.
+Acceptance therefore uses the explicit Unicode Shell API consistently, not a
+fallback after WScript failure. WScript observations remain diagnostic only;
+successful HRESULTs, exact target/profile/icon/working-directory semantics and
+unchanged snapshot/copy bytes remain mandatory. This controlled result is not
+proof that the previous actual installed links were correct: a fresh full
+installer acceptance run and its retained link evidence are still required.
 The full-build pause must be removed in a separately reviewed source change
 after the diagnostic evidence is inspected; it does not authorize publication.
 

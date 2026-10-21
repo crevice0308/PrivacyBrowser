@@ -26,6 +26,8 @@ import zipfile
 import verify_windows_native as native
 import windows_autoconfig_smoke
 import windows_places_smoke
+import windows_shortcut_evidence as shortcuts
+import windows_test_roots
 
 ROOT = Path(__file__).resolve().parents[1]
 SETUP_NAME = "PrivacyBrowser-0.1.0-dev-win64-setup-UNSIGNED.exe"
@@ -33,16 +35,26 @@ NSIS_URL = "https://github.com/mozilla-releng/adhoc-signing-blobs/raw/nsis/nsis-
 NSIS_SHA256 = "5856cd49b52870caa41814d71ce30c4304d5001b80c04f4eb7028ffedd91df7e"
 NSIS_BYTES = 2618390
 REQUIRED_INSTALLER_CHECKS = (
+    "directory_handle_blocks_rename",
+    "install_succeeded",
+    "unicode_owned_root_markers",
+    "exact_payload_hashes",
+    "native_display_metadata",
+    "native_shortcuts",
+    "per_user_registration",
     "places_xpcshell_completed",
+    "native_runtime_smoke_completed",
+    "locked_payload_uninstall_refused",
+    "active_browser_uninstall_refused",
+    "uninstall_exact_payload_and_metadata",
+    "profile_download_unknown_file_retention",
     "default_silent_retains_user_data",
     "reinstall_preserves_owned_profile",
     "ownership_marker_purge_refused",
-    "directory_handle_blocks_rename",
     "reparse_purge_refused",
     "locked_user_data_purge_retry_safe",
     "explicit_purge_owned_profile_cache_and_registry",
     "foreign_files_profiles_downloads_and_registry_retained",
-    "active_browser_uninstall_refused",
     "association_state_unchanged",
 )
 NSIS_DOWNLOAD_PATHS = {
@@ -324,6 +336,9 @@ def validate_installer_test(report: dict, installer_sha256: str, native_binary_s
     native.require(isinstance(checks, dict), "Missing detailed install/uninstall checks")
     for key in REQUIRED_INSTALLER_CHECKS:
         native.require(checks.get(key) is True, "Required install/uninstall check did not pass: " + key)
+    shortcut_report = report.get("shortcut_readback")
+    shortcuts.validate_actual(shortcut_report, installer_sha256, native_binary_sha256)
+    shortcuts.validate_binding(report.get("shortcut_readback_evidence"), shortcut_report)
 
 
 def stage(work: Path) -> None:
@@ -341,6 +356,12 @@ def stage(work: Path) -> None:
     native.validate_installer(setup)
     install_test = native.load_json(evidence / "windows-installer-test.json")
     validate_installer_test(install_test, native.digest(setup), native.digest(runtime / "privacybrowser.exe"))
+    shortcuts.validate_binding(install_test["shortcut_readback_evidence"], install_test["shortcut_readback"], evidence)
+    # Live hosted staging independently checks the recorded shell-folder bases.
+    folders = install_test["shortcut_readback"]["known_folders"]
+    for name, shell_name in (("desktop", "desktop"), ("programs", "programs"), ("local_appdata", "local-appdata")):
+        native.require(folders[name] == str(windows_test_roots.shell_folder(shell_name)),
+                       "Shortcut evidence known-folder mismatch")
     for suffix in (".json", ".build.log"):
         native.require(Path(str(setup) + suffix).is_file(), "Missing native installer evidence")
     output = work / "artifact"

@@ -21,6 +21,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
 import windows_prerelease as publisher
+from shortcut_evidence_fixtures import attach_shortcut_report
 from windows_autoconfig_smoke_test import make_retained_fixture
 from windows_places_smoke_test import make_retained_fixture as make_places_fixture
 
@@ -395,9 +396,9 @@ class PublicationTests(unittest.TestCase):
             "artifact": publisher.SETUP, "sha256": self.request["installer_sha256"], "artifact_bytes": len(b"inert setup"),
             "native_binary_sha256": binary_hash, "source_build_evidence": {"manifest_sha256": publisher.native.digest(retained / "build-evidence.json")},
             "installer_compiled": True, "authenticode_signed": False, "official_release": False, "release_eligible": False})
-        json_file(retained / "windows-installer-test.json", {"schema_version": 1, "passed": True,
+        json_file(retained / "windows-installer-test.json", attach_shortcut_report({"schema_version": 1, "passed": True,
             "installer_sha256": self.request["installer_sha256"], "native_binary_sha256": binary_hash, "release_eligible": False,
-            "checks": {name: True for name in publisher.evidence.REQUIRED_INSTALLER_CHECKS}})
+            "checks": {name: True for name in publisher.evidence.REQUIRED_INSTALLER_CHECKS}}, retained))
         json_file(retained / "toolchain.json", {"commit": C, "run_id": str(NID), "ephemeral_github_runner": True})
         commands, screenshots = [], []
         binary = "D:/pb/candidate/PrivacyBrowser/privacybrowser.exe"

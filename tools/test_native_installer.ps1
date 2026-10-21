@@ -201,14 +201,96 @@ $checks.exact_payload_hashes = $true
 $version = (Get-Item -LiteralPath $exe).VersionInfo
 Assert-True ($version.ProductName -ceq 'PrivacyBrowser' -and $version.FileDescription -ceq 'PrivacyBrowser') 'Installed executable metadata is not PrivacyBrowser.'
 $checks.native_display_metadata = $true
-$shell = New-Object -ComObject WScript.Shell
-foreach ($link in @($desktopLink, $programLink)) {
-    Assert-True (Test-Path -LiteralPath $link -PathType Leaf) 'An expected per-user shortcut is missing.'
-    $shortcut = $shell.CreateShortcut($link) # Read only; Save is never called.
-    Assert-True ($shortcut.TargetPath -ieq $exe) 'A shortcut points to the wrong native executable.'
-    Assert-True ($shortcut.Arguments -ceq ('-no-remote -profile "' + $profile + '"')) 'A shortcut uses the wrong independent profile.'
-    $expectedIcon = Join-Path $installDir 'distribution\privacybrowser\assets\privacybrowser.ico'
-    Assert-True ($shortcut.IconLocation -ieq ($expectedIcon + ',0') -or $shortcut.IconLocation -ieq $expectedIcon) 'A shortcut uses the wrong icon.'
+# Both paths and snapshot roles come only from the fresh installation and current
+# per-user shell folders. No caller-supplied shortcut, normalization or fallback.
+. (Join-Path $PSScriptRoot 'windows_shortcut_reader.ps1')
+$shortcutOutput = 'D:\pb\evidence\windows-installer-shortcuts.json'
+$shortcutDirectories = [Collections.Generic.List[IDisposable]]::new()
+$shortcutPinned = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+$shortcutStream = $null
+$shortcutReport = [ordered]@{
+    schema_version = 1; authoritative_reader = 'IShellLinkW'; wsh_role = 'non-authoritative diagnostic'
+    passed = $false; installer_sha256 = $installerHash; native_binary_sha256 = $nativeHash
+    install_directory = $installDir; error_type = $null; error_hresult = $null
+    known_folders = [ordered]@{
+        desktop = [Environment]::GetFolderPath('Desktop')
+        programs = [Environment]::GetFolderPath('Programs')
+        local_appdata = [Environment]::GetFolderPath('LocalApplicationData')
+    }
+    expected = [ordered]@{
+        target = $exe; arguments = '-no-remote -profile "' + $profile + '"'
+        icon = Join-Path $installDir 'distribution\privacybrowser\assets\privacybrowser.ico'
+        icon_index = 0; working_directory = $installDir
+    }
+    links = @(); copies_identical = $false; files_unchanged = $false
+    browser_executed = $false; shortcut_executed = $false; resolve_called = $false; save_called = $false
+    release_eligible = $false
+    limitations = 'Readback only, not icon rendering or concurrent-writer proof. Offline validation checks retained consistency, not independent host truth.'
+}
+try {
+    Pin-ShortcutParents $shortcutOutput $shortcutDirectories $shortcutPinned
+    $shortcutStream = [IO.File]::Open($shortcutOutput, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    Assert-True ($profileRoot -ceq (Join-Path $shortcutReport.known_folders.local_appdata 'PrivacyBrowser')) 'Profile root differs from the actual known folder.'
+    $entries = @(
+        @{ kind = 'desktop'; path = $desktopLink; wsh = $true },
+        @{ kind = 'program'; path = $programLink; wsh = $true },
+        @{ kind = 'desktop-snapshot'; path = Join-Path $installDir 'PrivacyBrowser.desktop-link'; wsh = $false },
+        @{ kind = 'program-snapshot'; path = Join-Path $installDir 'PrivacyBrowser.program-link'; wsh = $false }
+    )
+    foreach ($entry in $entries) {
+        $link = [ordered]@{
+            kind = $entry.kind; path = $entry.path; bytes = $null; bytes_after = $null
+            identity_before = $null; identity_after = $null; sha256_before = $null; sha256_after = $null
+            wide = $null; wsh = $null; wsh_observed = $entry.wsh; passed = $false
+            error_type = $null; error_hresult = $null
+        }
+        $shortcutReport.links += $link
+        try {
+            Pin-ShortcutParents $entry.path $shortcutDirectories $shortcutPinned
+            $before = [PrivacyBrowserShortcut.FileSafety]::ObserveFile($entry.path)
+            $link.bytes = $before.bytes; $link.identity_before = $before.identity; $link.sha256_before = $before.sha256
+            $link.wide = [PrivacyBrowserShortcut.LinkReader]::Read($entry.path)
+            if ($entry.wsh) { $link.wsh = Read-Wsh $entry.path }
+            $after = [PrivacyBrowserShortcut.FileSafety]::ObserveFile($entry.path)
+            $link.bytes_after = $after.bytes; $link.identity_after = $after.identity; $link.sha256_after = $after.sha256
+            $link.passed = ((Test-WideShortcut $link.wide $shortcutReport.expected) -and
+                $before.bytes -eq $after.bytes -and $before.sha256 -ceq $after.sha256 -and $before.identity -ceq $after.identity)
+        } catch {
+            $link.error_type = $_.Exception.GetType().FullName
+            $link.error_hresult = $_.Exception.HResult
+        }
+    }
+    $shortcutReport.copies_identical = (
+        [PrivacyBrowserShortcut.FileSafety]::EqualFiles($desktopLink, (Join-Path $installDir 'PrivacyBrowser.desktop-link')) -and
+        [PrivacyBrowserShortcut.FileSafety]::EqualFiles($programLink, (Join-Path $installDir 'PrivacyBrowser.program-link')))
+    $shortcutReport.files_unchanged = @($shortcutReport.links | Where-Object {
+        $null -eq $_.sha256_before -or $_.sha256_before -cne $_.sha256_after -or
+        $_.identity_before -cne $_.identity_after -or $_.bytes -ne $_.bytes_after
+    }).Count -eq 0
+    $shortcutReport.passed = ($shortcutReport.copies_identical -and $shortcutReport.files_unchanged -and
+        $shortcutReport.links.Count -eq 4 -and @($shortcutReport.links | Where-Object { -not $_.passed }).Count -eq 0)
+} catch {
+    $shortcutReport.error_type = $_.Exception.GetType().FullName
+    $shortcutReport.error_hresult = $_.Exception.HResult
+} finally {
+    try {
+        if ($null -ne $shortcutStream) {
+            $shortcutJson = ($shortcutReport | ConvertTo-Json -Depth 12 -Compress) + [Environment]::NewLine
+            $shortcutBytes = [Text.Encoding]::UTF8.GetBytes($shortcutJson)
+            Assert-True ($shortcutBytes.Length -le 1048576) 'Shortcut diagnostic exceeds its bound.'
+            $shortcutStream.Write($shortcutBytes, 0, $shortcutBytes.Length)
+            $shortcutStream.Flush($true)
+        }
+    } finally {
+        if ($null -ne $shortcutStream) { $shortcutStream.Dispose() }
+        for ($index = $shortcutDirectories.Count - 1; $index -ge 0; $index--) { $shortcutDirectories[$index].Dispose() }
+    }
+}
+# Retain the bounded failure observations BEFORE asserting any readback result.
+Assert-True ($shortcutReport.passed) 'Unicode shortcut acceptance failed; inspect windows-installer-shortcuts.json.'
+$shortcutBinding = [ordered]@{
+    path = 'windows-installer-shortcuts.json'; bytes = $shortcutBytes.Length
+    sha256 = File-Hash $shortcutOutput; json = $shortcutJson
 }
 $checks.native_shortcuts = $true
 $entry = Get-ItemProperty -LiteralPath $registry
@@ -388,6 +470,8 @@ $report = [ordered]@{
     native_binary_sha256 = $nativeHash
     payload_files_verified = $payload.Count
     checks = $checks
+    shortcut_readback = $shortcutReport
+    shortcut_readback_evidence = $shortcutBinding
     environment = 'ephemeral GitHub-hosted Windows runner'
     interactive_installer_gui_tested = $false
     normal_browsing_ime_tested = $false
