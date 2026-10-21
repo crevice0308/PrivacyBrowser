@@ -34,6 +34,8 @@ SHORTCUT_LINKS = (("direct", "direct.lnk", True),
                   ("program-snapshot", "PrivacyBrowser.program-link", False),
                   ("desktop-copy", r"relocated\desktop.lnk", True),
                   ("program-copy", r"relocated\program.lnk", True))
+SHORTCUT_ASCII_LINKS = (("desktop-ascii-copy", "desktop.lnk", True),
+                        ("program-ascii-copy", "program.lnk", True))
 FILE_COUNT = 1500  # More than one 64-KiB FILE_FULL_DIR_INFO enumeration buffer.
 
 
@@ -155,6 +157,7 @@ def validate_shortcut_readback(report: dict) -> None:
     for case, (case_id, folder, profile) in zip(cases, SHORTCUT_CASES):
         native.require(isinstance(case, dict), "Invalid shortcut case")
         directory = ntpath.join(SHORTCUT_ROOT, folder)
+        ascii_directory = ntpath.join(SHORTCUT_ROOT, "ascii-link-copies-" + case_id)
         expected = {"target": ntpath.join(directory, "privacybrowser.exe"),
                     "arguments": '-no-remote -profile "' + ntpath.join(SHORTCUT_ROOT, "profiles", profile) + '"',
                     "icon": ntpath.join(directory, "reference.ico"), "icon_index": 0,
@@ -163,13 +166,18 @@ def validate_shortcut_readback(report: dict) -> None:
                        and case.get("passed") is True and case.get("copies_identical") is True
                        and case.get("files_unchanged") is True and case.get("error_type") is None
                        and case.get("error_hresult") is None, "Synthetic shortcut case failed")
+        native.require(ascii_directory.isascii() and case.get("ascii_copy_directory") == ascii_directory
+                       and case.get("ascii_copies_identical") is True, "Invalid ASCII shortcut copy control")
         links = case.get("links")
-        native.require(isinstance(links, list) and len(links) == len(SHORTCUT_LINKS), "Missing shortcut observations")
-        for link, (kind, relative, wsh_required) in zip(links, SHORTCUT_LINKS):
+        fixed_links = [(kind, ntpath.join(directory, relative), wsh) for kind, relative, wsh in SHORTCUT_LINKS]
+        fixed_links += [(kind, ntpath.join(ascii_directory, relative), wsh)
+                        for kind, relative, wsh in SHORTCUT_ASCII_LINKS]
+        native.require(isinstance(links, list) and len(links) == len(fixed_links), "Missing shortcut observations")
+        for link, (kind, path, wsh_required) in zip(links, fixed_links):
             native.require(isinstance(link, dict), "Invalid shortcut observation")
             before = link.get("sha256_before")
             identity = link.get("identity_before")
-            native.require(link.get("kind") == kind and link.get("path") == ntpath.join(directory, relative)
+            native.require(link.get("kind") == kind and link.get("path") == path
                            and link.get("passed") is True and link.get("wsh_required") is wsh_required
                            and isinstance(link.get("bytes"), int) and 0 < link["bytes"] <= 65536
                            and isinstance(before, str) and len(before) == 64
@@ -201,7 +209,7 @@ def validate_shortcut_readback(report: dict) -> None:
                     else:
                         native.require(type(observed) is type(value) and observed == value,
                                        "Shortcut " + name + " mismatch")
-        for source, copied in ((1, 3), (2, 4)):
+        for source, copied in ((1, 3), (2, 4), (1, 5), (2, 6)):
             native.require(links[source]["sha256_before"] == links[copied]["sha256_before"]
                            and links[source]["bytes"] == links[copied]["bytes"], "Shortcut copy mismatch")
 

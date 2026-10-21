@@ -27,20 +27,26 @@ def model_report():
         report[name] = False
     for identity, folder, profile in synthetic.SHORTCUT_CASES:
         directory = ntpath.join(synthetic.SHORTCUT_ROOT, folder)
+        ascii_directory = ntpath.join(synthetic.SHORTCUT_ROOT, "ascii-link-copies-" + identity)
         expected = {"target": ntpath.join(directory, "privacybrowser.exe"),
                     "arguments": '-no-remote -profile "' + ntpath.join(synthetic.SHORTCUT_ROOT, "profiles", profile) + '"',
                     "icon": ntpath.join(directory, "reference.ico"), "icon_index": 0,
                     "working_directory": directory}
         case = {"id": identity, "expected": expected, "passed": True, "files_unchanged": True,
-                "copies_identical": True, "error_type": None, "error_hresult": None, "links": []}
-        for kind, relative, wsh_required in synthetic.SHORTCUT_LINKS:
+                "copies_identical": True, "ascii_copy_directory": ascii_directory,
+                "ascii_copies_identical": True, "error_type": None, "error_hresult": None, "links": []}
+        fixed_links = [(kind, ntpath.join(directory, relative), wsh)
+                       for kind, relative, wsh in synthetic.SHORTCUT_LINKS]
+        fixed_links += [(kind, ntpath.join(ascii_directory, relative), wsh)
+                        for kind, relative, wsh in synthetic.SHORTCUT_ASCII_LINKS]
+        for kind, path, wsh_required in fixed_links:
             wide = {**expected, "load_mode": 0, "path_flags": 0, "strings_within_bound": True,
                     "error_type": None, "error_hresult": None}
             for name in ("load_hresult", "target_hresult", "arguments_hresult", "icon_hresult", "working_directory_hresult"):
                 wide[name] = 0
             wsh = {**expected, "strings_within_bound": True, "read_succeeded": True,
                    "error_type": None, "error_hresult": None, "icon_location": expected["icon"] + ",0"}
-            case["links"].append({"kind": kind, "path": ntpath.join(directory, relative), "bytes": 256,
+            case["links"].append({"kind": kind, "path": path, "bytes": 256,
                                   "sha256_before": "a" * 64, "sha256_after": "a" * 64,
                                   "identity_before": "11111111:00000000:00000001", "identity_after": "11111111:00000000:00000001",
                                   "wide": wide, "wsh": wsh if wsh_required else None,
@@ -52,6 +58,90 @@ def model_report():
 class ShortcutReadbackModelTests(unittest.TestCase):
     def test_complete_model_is_accepted_but_not_a_windows_execution(self):
         synthetic.validate_shortcut_readback(model_report())
+
+    def test_ascii_path_controls_append_to_all_original_observations(self):
+        report = model_report()
+        self.assertLess(len(json.dumps(report).encode("utf-8")), synthetic.SHORTCUT_MAX_BYTES)
+        for case in report["cases"]:
+            with self.subTest(case=case["id"]):
+                self.assertEqual([link["kind"] for link in case["links"]],
+                                 ["direct", "desktop-snapshot", "program-snapshot", "desktop-copy", "program-copy",
+                                  "desktop-ascii-copy", "program-ascii-copy"])
+                fixed = r"D:\pb\installer-syntax\execution\app\shortcut-probe\ascii-link-copies-" + case["id"]
+                self.assertEqual(case["ascii_copy_directory"], fixed)
+                self.assertTrue(fixed.isascii())
+                for link, leaf in zip(case["links"][5:], ("desktop.lnk", "program.lnk")):
+                    self.assertEqual(link["path"], fixed + "\\" + leaf)
+                    self.assertTrue(link["path"].isascii())
+                    self.assertTrue(link["wsh_required"])
+                    for reader in ("wide", "wsh"):
+                        for field, value in case["expected"].items():
+                            self.assertEqual(link[reader][field], value)
+                self.assertEqual(sum(link["wsh_required"] for link in case["links"]), 5)
+
+    def test_ascii_controls_reject_unfixed_unicode_or_cross_case_paths(self):
+        for index in (5, 6):
+            for path in (r"C:\elsewhere.lnk",
+                         synthetic.SHORTCUT_ROOT + r"\PrivacyBrowser-日本語\desktop.lnk",
+                         synthetic.SHORTCUT_ROOT + r"\ascii-link-copies-ascii\desktop.lnk",
+                         synthetic.SHORTCUT_ROOT + r"\ascii-link-copies-unicode\..\desktop.lnk"):
+                report = model_report()
+                report["cases"][1]["links"][index]["path"] = path
+                with self.subTest(index=index, path=path), self.assertRaises(ValueError):
+                    synthetic.validate_shortcut_readback(report)
+        for field, value in (("ascii_copy_directory", r"C:\elsewhere"), ("ascii_copies_identical", False)):
+            report = model_report()
+            report["cases"][1][field] = value
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                synthetic.validate_shortcut_readback(report)
+        report = model_report()
+        report["cases"][1]["links"] = report["cases"][1]["links"][:5]
+        with self.assertRaises(ValueError):
+            synthetic.validate_shortcut_readback(report)
+
+    def test_ascii_controls_require_both_readers_and_unchanged_bytes(self):
+        for index in (5, 6):
+            for reader in ("wide", "wsh"):
+                for field, value in (("target", ""), ("arguments", "wrong"), ("icon", ""),
+                                     ("icon_index", 1), ("working_directory", "wrong")):
+                    report = model_report()
+                    report["cases"][2]["links"][index][reader][field] = value
+                    with self.subTest(index=index, reader=reader, field=field), self.assertRaises(ValueError):
+                        synthetic.validate_shortcut_readback(report)
+            for field, value in (("sha256_after", "b" * 64), ("bytes", 255),
+                                 ("identity_after", "11111111:00000000:00000002"), ("wsh_required", False)):
+                report = model_report()
+                report["cases"][2]["links"][index][field] = value
+                with self.subTest(index=index, field=field), self.assertRaises(ValueError):
+                    synthetic.validate_shortcut_readback(report)
+
+    def test_ascii_copies_must_match_their_own_snapshot_not_just_each_other(self):
+        report = model_report()
+        links = report["cases"][1]["links"]
+        for indices, digest, size in (((1, 3, 5), "d" * 64, 251), ((2, 4, 6), "e" * 64, 252)):
+            for index in indices:
+                links[index].update(sha256_before=digest, sha256_after=digest, bytes=size)
+        synthetic.validate_shortcut_readback(report)
+        for index in (5, 6):
+            for field in ("hash", "bytes"):
+                changed = deepcopy(report)
+                link = changed["cases"][1]["links"][index]
+                wrong = links[6 if index == 5 else 5]
+                if field == "hash":
+                    link.update(sha256_before=wrong["sha256_before"], sha256_after=wrong["sha256_after"])
+                else:
+                    link["bytes"] = wrong["bytes"]
+                with self.subTest(index=index, field=field), self.assertRaisesRegex(ValueError, "copy mismatch"):
+                    synthetic.validate_shortcut_readback(changed)
+
+    def test_successful_ascii_controls_do_not_hide_original_unicode_wsh_failure(self):
+        for case_index in (1, 2):
+            for link_index in (0, 3, 4):
+                report = model_report()
+                report["cases"][case_index]["links"][link_index]["wsh"].update(
+                    target="", arguments="", icon="", working_directory="")
+                with self.subTest(case=case_index, link=link_index), self.assertRaises(ValueError):
+                    synthetic.validate_shortcut_readback(report)
 
     def test_target_case_matches_existing_real_gate_but_aliases_do_not(self):
         for reader in ("wide", "wsh"):
@@ -343,10 +433,10 @@ if ($decoded.load_hresult -ne 0 -or $decoded.target -ine $expected.target) { thr
         self.assertIn("$link.passed = $wideOk -and $wshOk", self.reader)
 
     def test_safe_read_pins_bounds_hashes_and_all_fixed_cases(self):
-        for _, folder, profile in synthetic.SHORTCUT_CASES:
+        for case_id, folder, profile in synthetic.SHORTCUT_CASES:
             self.assertIn(folder, self.reader)
             self.assertIn(profile, self.reader)
-            self.assertIn('!insertmacro SyntheticShortcutCase "' + folder + '" "' + profile + '"', self.fixture)
+            self.assertIn('!insertmacro SyntheticShortcutCase "' + case_id + '" "' + folder + '" "' + profile + '"', self.fixture)
         for guard in ("0x02200000", "0x00200000", "(info.Attributes & 0x410)", "info.Links != 1",
                       "info.SizeLow > 65536", "const int Limit = 1024", "$MaxReportBytes = 1048576"):
             self.assertIn(guard, self.reader)
@@ -362,6 +452,21 @@ if ($decoded.load_hresult -ne 0 -or $decoded.target -ine $expected.target) { thr
         self.assertIn("$case.links[2].sha256_before -ceq $case.links[4].sha256_before", self.reader)
         self.assertIn("A passing probe does not explain the earlier real installer failure", self.reader)
 
+    def test_fixed_ascii_copy_directories_are_pinned_and_checks_are_additive(self):
+        self.assertIn("$asciiCopyRoot = $Root + '\\ascii-link-copies-' + $definition.id", self.reader)
+        self.assertIn("Assert-True ($asciiCopyRoot -cmatch '^[\\x00-\\x7f]+$')", self.reader)
+        pin = "$directories.Add([PrivacyBrowserSynthetic.FileSafety]::PinDirectory($asciiCopyRoot))"
+        self.assertIn(pin, self.reader)
+        self.assertLess(self.reader.index(pin), self.reader.index("$before = [PrivacyBrowserSynthetic.FileSafety]::ObserveFile($path)"))
+        self.assertIn("$entries += $asciiEntries", self.reader)
+        for kind, leaf, _ in synthetic.SHORTCUT_ASCII_LINKS:
+            self.assertIn("@{ kind = '" + kind + "'; relative = '" + leaf + "'; wsh = $true }", self.reader)
+        for source, copied in ((1, 5), (2, 6)):
+            self.assertIn(f"$case.links[{source}].sha256_before -ceq $case.links[{copied}].sha256_before", self.reader)
+            self.assertIn(f"$case.links[{source}].bytes -eq $case.links[{copied}].bytes", self.reader)
+        self.assertIn("$case.files_unchanged -and $case.copies_identical -and $case.ascii_copies_identical -and", self.reader)
+        self.assertIn("@($case.links | Where-Object { -not $_.passed }).Count -eq 0", self.reader)
+
     def test_fixture_is_owned_fixed_inert_new_only_and_uses_production_primitives(self):
         main = self.fixture.split("Function NativeSafetyFixtureMain", 1)[1].split("FunctionEnd", 1)[0]
         for earlier in ("Call CreateFreshInstallDirectory", "Call EnsureOwnedRoot", "WriteUninstaller"):
@@ -371,9 +476,21 @@ if ($decoded.load_hresult -ne 0 -or $decoded.target -ine $expected.target) { thr
         macro = self.fixture.split("!macro SyntheticShortcutCase", 1)[1].split("!macroend", 1)[0]
         self.assertEqual(macro.count("Call WriteNewAsciiFile"), 2)
         self.assertEqual(macro.count("!insertmacro SyntheticNewShortcut "), 3)
-        self.assertEqual(macro.count("Call CopyNewShortcut"), 2)
+        self.assertEqual(macro.count("Call CopyNewShortcut"), 4)
         self.assertIn(r"\relocated\desktop.lnk", macro)
         self.assertIn(r"\relocated\program.lnk", macro)
+        directory = r'!insertmacro SyntheticNewShortcutDirectory "$INSTDIR\shortcut-probe\ascii-link-copies-${CASE_ID}"'
+        self.assertIn(directory, macro)
+        self.assertLess(macro.index(directory), macro.index("Call CopyNewShortcut"))
+        for stem in ("desktop", "program"):
+            self.assertIn('StrCpy $0 "$INSTDIR\\shortcut-probe\\${FOLDER}\\PrivacyBrowser.' + stem + '-link"\n'
+                          '  StrCpy $1 "$INSTDIR\\shortcut-probe\\ascii-link-copies-${CASE_ID}\\' + stem + '.lnk"\n'
+                          '  Call CopyNewShortcut', macro)
+        directory_macro = self.fixture.split("!macro SyntheticNewShortcutDirectory PATH", 1)[1].split("!macroend", 1)[0]
+        self.assertIn("StrCpy $NativeDisposition 2", directory_macro)
+        self.assertIn("StrCpy $NativeShare 3", directory_macro)
+        self.assertIn("Call OpenNoReparse", directory_macro)
+        self.assertIn('StrCpy $SyntheticShortcutDirectoryLocks "$0|$SyntheticShortcutDirectoryLocks"', directory_macro)
         create = self.fixture.split("!macro SyntheticNewShortcut PATH", 1)[1].split("!macroend", 1)[0]
         self.assertIn("${OrIf} $NativeError != 2", create)
         self.assertLess(create.index("Call OpenNoReparse"), create.index("CreateShortcut"))

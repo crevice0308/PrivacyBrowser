@@ -73,9 +73,11 @@ Var SyntheticShortcutDirectoryLocks
   ${EndIf}
 !macroend
 
-!macro SyntheticShortcutCase FOLDER PROFILE
+!macro SyntheticShortcutCase CASE_ID FOLDER PROFILE
   !insertmacro SyntheticNewShortcutDirectory "$INSTDIR\shortcut-probe\${FOLDER}"
   !insertmacro SyntheticNewShortcutDirectory "$INSTDIR\shortcut-probe\${FOLDER}\relocated"
+  ; Keep link-file path encoding independent of the unchanged target/arguments.
+  !insertmacro SyntheticNewShortcutDirectory "$INSTDIR\shortcut-probe\ascii-link-copies-${CASE_ID}"
   StrCpy $0 "$INSTDIR\shortcut-probe\${FOLDER}\privacybrowser.exe"
   StrCpy $1 "Inert text target. Never execute."
   Call WriteNewAsciiFile
@@ -95,6 +97,12 @@ Var SyntheticShortcutDirectoryLocks
   Call CopyNewShortcut
   StrCpy $0 "$INSTDIR\shortcut-probe\${FOLDER}\PrivacyBrowser.program-link"
   StrCpy $1 "$INSTDIR\shortcut-probe\${FOLDER}\relocated\program.lnk"
+  Call CopyNewShortcut
+  StrCpy $0 "$INSTDIR\shortcut-probe\${FOLDER}\PrivacyBrowser.desktop-link"
+  StrCpy $1 "$INSTDIR\shortcut-probe\ascii-link-copies-${CASE_ID}\desktop.lnk"
+  Call CopyNewShortcut
+  StrCpy $0 "$INSTDIR\shortcut-probe\${FOLDER}\PrivacyBrowser.program-link"
+  StrCpy $1 "$INSTDIR\shortcut-probe\ascii-link-copies-${CASE_ID}\program.lnk"
   Call CopyNewShortcut
 !macroend
 
@@ -149,9 +157,9 @@ Function NativeSafetyFixtureMain
   ; All probes remain below the fresh owned app root, never Desktop/Programs.
   !insertmacro SyntheticPhase "" "create-shortcut-roundtrip-fixtures"
   !insertmacro SyntheticNewShortcutDirectory "$INSTDIR\shortcut-probe"
-  !insertmacro SyntheticShortcutCase "PrivacyBrowser-ASCII" "ascii profile"
-  !insertmacro SyntheticShortcutCase "PrivacyBrowser-日本語" "日本語 profile"
-  !insertmacro SyntheticShortcutCase "PrivacyBrowser 日本語 Space" "日本語 space profile"
+  !insertmacro SyntheticShortcutCase "ascii" "PrivacyBrowser-ASCII" "ascii profile"
+  !insertmacro SyntheticShortcutCase "unicode" "PrivacyBrowser-日本語" "日本語 profile"
+  !insertmacro SyntheticShortcutCase "unicode-space" "PrivacyBrowser 日本語 Space" "日本語 space profile"
   ClearErrors
   SetOutPath "$INSTDIR"
   IfErrors 0 +2

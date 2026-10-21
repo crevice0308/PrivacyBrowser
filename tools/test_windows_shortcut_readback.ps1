@@ -238,6 +238,7 @@ try {
     )
     foreach ($definition in $definitions) {
         $caseRoot = $Root + '\' + $definition.folder
+        $asciiCopyRoot = $Root + '\ascii-link-copies-' + $definition.id
         $case = [ordered]@{
             id = $definition.id; passed = $false; error_type = $null; error_hresult = $null
             expected = [ordered]@{
@@ -246,11 +247,14 @@ try {
                 icon = $caseRoot + '\reference.ico'; icon_index = 0; working_directory = $caseRoot
             }
             links = @(); copies_identical = $false; files_unchanged = $false
+            ascii_copy_directory = $asciiCopyRoot; ascii_copies_identical = $false
         }
         $report.cases += $case
         try {
             $directories.Add([PrivacyBrowserSynthetic.FileSafety]::PinDirectory($caseRoot))
             $directories.Add([PrivacyBrowserSynthetic.FileSafety]::PinDirectory($caseRoot + '\relocated'))
+            Assert-True ($asciiCopyRoot -cmatch '^[\x00-\x7f]+$')
+            $directories.Add([PrivacyBrowserSynthetic.FileSafety]::PinDirectory($asciiCopyRoot))
             # Validate inert references without holding file locks during COM.
             foreach ($path in @($case.expected.target, $case.expected.icon)) {
                 [void][PrivacyBrowserSynthetic.FileSafety]::ObserveFile($path)
@@ -262,8 +266,17 @@ try {
                 @{ kind = 'desktop-copy'; relative = 'relocated\desktop.lnk'; wsh = $true },
                 @{ kind = 'program-copy'; relative = 'relocated\program.lnk'; wsh = $true }
             )
+            # Append controls without replacing any original observation. The
+            # copied bytes still describe the same case target and arguments.
+            $asciiEntries = @(
+                @{ kind = 'desktop-ascii-copy'; relative = 'desktop.lnk'; wsh = $true },
+                @{ kind = 'program-ascii-copy'; relative = 'program.lnk'; wsh = $true }
+            )
+            foreach ($entry in $entries) { $entry.path = $caseRoot + '\' + $entry.relative }
+            foreach ($entry in $asciiEntries) { $entry.path = $asciiCopyRoot + '\' + $entry.relative }
+            $entries += $asciiEntries
             foreach ($entry in $entries) {
-                $path = $caseRoot + '\' + $entry.relative
+                $path = $entry.path
                 $before = [PrivacyBrowserSynthetic.FileSafety]::ObserveFile($path)
                 $case.links += [ordered]@{
                     kind = $entry.kind; path = $path; bytes = $before.bytes
@@ -299,7 +312,11 @@ try {
             }).Count -eq 0
             $case.copies_identical = ($case.links[1].sha256_before -ceq $case.links[3].sha256_before -and
                                      $case.links[2].sha256_before -ceq $case.links[4].sha256_before)
-            $case.passed = ($case.files_unchanged -and $case.copies_identical -and
+            $case.ascii_copies_identical = ($case.links[1].sha256_before -ceq $case.links[5].sha256_before -and
+                                          $case.links[1].bytes -eq $case.links[5].bytes -and
+                                          $case.links[2].sha256_before -ceq $case.links[6].sha256_before -and
+                                          $case.links[2].bytes -eq $case.links[6].bytes)
+            $case.passed = ($case.files_unchanged -and $case.copies_identical -and $case.ascii_copies_identical -and
                            @($case.links | Where-Object { -not $_.passed }).Count -eq 0)
         } catch {
             $case.error_type = $_.Exception.GetType().FullName
