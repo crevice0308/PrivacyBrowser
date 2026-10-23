@@ -387,50 +387,69 @@ if ($parseErrors.Count -ne 0) { throw ($parseErrors | Out-String) }
 """ + ". '" + shared_path + "'\n" + r"""
 $expected = @{ target = 'D:\fixed\日本語 Space\privacybrowser.exe'; arguments = '-profile "D:\fixed\profile"';
                icon = 'D:\fixed\reference.ico'; icon_index = 0; working_directory = 'D:\fixed\日本語 Space' }
-$actual = [PrivacyBrowserShortcut.WideResult]::new()
-foreach ($name in $expected.Keys) { $actual.$name = $expected[$name] }
-foreach ($name in @('load_hresult', 'target_hresult', 'arguments_hresult', 'icon_hresult', 'working_directory_hresult')) { $actual.$name = 0 }
-if (-not (Test-WideShortcut $actual $expected)) { throw 'Matching model failed.' }
+function New-ValidWideResult($Expected) {
+    # Leave nullable/error fields at their true CLR null defaults. Assigning
+    # PowerShell $null to a string field coerces it to an empty string instead.
+    $result = [PrivacyBrowserShortcut.WideResult]::new()
+    foreach ($name in $Expected.Keys) { $result.$name = $Expected[$name] }
+    foreach ($name in @('load_hresult', 'target_hresult', 'arguments_hresult', 'icon_hresult', 'working_directory_hresult')) {
+        $result.$name = 0
+    }
+    if ($null -ne $result.error_type -or $null -ne $result.error_hresult) { throw 'Pristine errors are not CLR null.' }
+    if (-not (Test-WideShortcut $result $Expected)) { throw 'Fresh valid model failed.' }
+    return $result
+}
+function Assert-RejectedWideMutation([string]$Field, $Value, $Expected) {
+    # Every vector starts from a fresh, proven-positive instance. No negative
+    # may pass merely because an earlier mutation left a different field bad.
+    $mutated = New-ValidWideResult $Expected
+    if (-not (Test-WideShortcut $mutated $Expected)) { throw "Pristine model failed before: $Field" }
+    if ($null -eq $Value) {
+        # SetValue's object argument preserves a true CLR null for both string
+        # and Nullable<int> fields, unlike PowerShell's typed-string assignment.
+        $mutated.GetType().GetField($Field).SetValue($mutated, $null)
+        if ($null -ne $mutated.$Field) { throw "True null mutation was coerced: $Field" }
+    } else {
+        $mutated.$Field = $Value
+    }
+    if (Test-WideShortcut $mutated $Expected) { throw "Invalid field passed: $Field" }
+    $recovered = New-ValidWideResult $Expected
+    if ([Object]::ReferenceEquals($mutated, $recovered)) { throw 'Recovery reused the mutated instance.' }
+    if (-not (Test-WideShortcut $recovered $Expected)) { throw "Fresh recovery failed after: $Field" }
+}
+$actual = New-ValidWideResult $expected
 $actual.target = $actual.target.ToUpperInvariant()
 if (-not (Test-WideShortcut $actual $expected)) { throw 'Case-insensitive target model failed.' }
-$actual.arguments = 'wrong'
-if (Test-WideShortcut $actual $expected) { throw 'Wrong arguments model passed.' }
-$actual.arguments = $expected.arguments
-$actual.error_type = 'SyntheticFailure'
-if (Test-WideShortcut $actual $expected) { throw 'Error model passed.' }
-$actual.error_type = $null
+
+# Direct regression for the CI failure: this apparent reset is NOT CLR null.
+# Keep it isolated, and require the production predicate to reject the empty
+# error field rather than weakening Matches to forgive the fixture mistake.
+$nullTrap = New-ValidWideResult $expected
+$nullTrap.error_type = 'SyntheticFailure'
+if (Test-WideShortcut $nullTrap $expected) { throw 'Error model passed.' }
+$nullTrap.error_type = $null
+if ($null -eq $nullTrap.error_type -or $nullTrap.error_type -cne '') { throw 'String null-coercion fixture changed.' }
+if (Test-WideShortcut $nullTrap $expected) { throw 'Coerced empty error field passed.' }
+$actual = New-ValidWideResult $expected
+if (-not (Test-WideShortcut $actual $expected)) { throw 'Fresh recovery after null-coercion trap failed.' }
+
 foreach ($field in @('load_hresult', 'target_hresult', 'arguments_hresult', 'icon_hresult', 'working_directory_hresult')) {
-    foreach ($value in @($null, 1, -1)) {
-        $actual.$field = $value
-        if (Test-WideShortcut $actual $expected) { throw "Invalid HRESULT passed: $field" }
-    }
-    $actual.$field = 0
+    foreach ($value in @($null, 1, -1)) { Assert-RejectedWideMutation $field $value $expected }
 }
 foreach ($field in @('target', 'arguments', 'icon', 'working_directory')) {
-    foreach ($value in @($null, '', 'wrong', ('x' * 1025))) {
-        $actual.$field = $value
-        if (Test-WideShortcut $actual $expected) { throw "Invalid string passed: $field" }
-    }
-    $actual.$field = $expected[$field]
+    foreach ($value in @($null, '', 'wrong', ('x' * 1025))) { Assert-RejectedWideMutation $field $value $expected }
 }
-$actual.icon_index = 1
-if (Test-WideShortcut $actual $expected) { throw 'Wrong icon index passed.' }
-$actual.icon_index = 0
-$actual.strings_within_bound = $false
-if (Test-WideShortcut $actual $expected) { throw 'Truncated read passed.' }
-$actual.strings_within_bound = $true
-foreach ($field in @('load_mode', 'path_flags')) {
-    $actual.$field = 1
-    if (Test-WideShortcut $actual $expected) { throw 'Wrong reader flags passed.' }
-    $actual.$field = 0
-}
-$actual.error_hresult = -1
-if (Test-WideShortcut $actual $expected) { throw 'Reader error passed.' }
-$actual.error_hresult = $null
-if (-not (Test-WideShortcut $actual $expected)) { throw 'Restored model failed.' }
+foreach ($value in @('SyntheticFailure', '')) { Assert-RejectedWideMutation 'error_type' $value $expected }
+Assert-RejectedWideMutation 'icon_index' 1 $expected
+Assert-RejectedWideMutation 'strings_within_bound' $false $expected
+foreach ($field in @('load_mode', 'path_flags')) { Assert-RejectedWideMutation $field 1 $expected }
+Assert-RejectedWideMutation 'error_hresult' -1 $expected
+$actual = New-ValidWideResult $expected
+if (-not (Test-WideShortcut $actual $expected)) { throw 'Fresh serialization model failed.' }
 $encoded = $actual | ConvertTo-Json -Compress
 $decoded = $encoded | ConvertFrom-Json
-if ($decoded.load_hresult -ne 0 -or $decoded.target -ine $expected.target) { throw 'Public-field serialization failed.' }
+if ($decoded.load_hresult -ne 0 -or $decoded.target -ine $expected.target -or
+    $null -ne $decoded.error_type -or $null -ne $decoded.error_hresult) { throw 'Public-field serialization failed.' }
 # Pure mock: no real WSH/COM/file operation. Cleanup of a non-COM authored
 # object intentionally throws and must remain a bounded non-authoritative observation.
 $script:FakeShortcut = [pscustomobject]@{ TargetPath = $expected.target; Arguments = $expected.arguments;
