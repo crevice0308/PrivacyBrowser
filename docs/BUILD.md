@@ -104,3 +104,26 @@ python3 tools/integration_test.py --binary /path/to/privacybrowser-dev/firefox \
 ```
 
 Marionette のシステム権限はローカルのテスト用起動に限って使用します。普段のランチャーにテスト権限を付けません。ネイティブ stderr はプロファイルと共に一時領域へ出力し、診断 ZIP に含めません。公開前には通常のデスクトップ環境で日本語 IME、一般サイト、6 キーワードの検索、全分類の実データ再起動検証、完全終了、異常終了、インストール削除、署名、更新失敗復旧、1GB RAM、長時間メモリ測定を追加する必要があります。
+
+## Windows bootstrap download failures
+
+Run [39943171624](https://github.com/crevice0308/PrivacyBrowser/actions/runs/39943171624)
+never reached `mach build`. During bootstrap, repeated incomplete MSVC downloads
+exhausted the vendored downloader's retries. Python could not deserialize its
+`ContentTooShortError` in the multiprocessing result thread, leaving bootstrap
+waiting until the hosted job's six-hour limit.
+
+The native build now applies a SHA-256-pinned, fail-closed correction to the
+reviewed ESR downloader: an exhausted short download remains a failure, but its
+exception can cross the worker-process boundary. Download selection, five
+attempts, upstream payload hash checks, and extraction ordering are unchanged.
+This does not repair an unavailable or truncating download service.
+
+Bootstrap also has a separate 30-minute wall-clock bound. A private stdin
+handshake prevents bootstrap from starting until its child belongs to a Windows
+kill-on-close job object. Timeout or supervisor termination closes that owned
+process tree, not unrelated processes. `bootstrap-supervisor.json` records the
+limit, outcome and bounded error types; `bootstrap-exit.json` still records the
+shell/tee statuses. No automatic retry is added. Source compilation, packaging,
+PE hardening, installer, Places and runtime gates remain mandatory. Windows job
+execution is covered by inert Windows CI fixtures, not claimed from Linux tests.
