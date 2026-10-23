@@ -48,7 +48,7 @@ following JSON shape. Hash placeholders are illustrative, not accepted values.
   "source_compiled": true,
   "official_release": false,
   "target": "windows",
-  "upstream_version": "153.5.0esr",
+  "upstream_version": "153.5.1esr",
   "native_binary": "privacybrowser.exe",
   "files": {
     "privacybrowser.exe": "<SHA-256>",
