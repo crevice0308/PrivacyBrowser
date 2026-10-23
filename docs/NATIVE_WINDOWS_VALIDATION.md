@@ -200,10 +200,14 @@ exit/start-error and timeout records before success assertions; these records
 contain no command paths, profile contents or registry values. They do not
 claim to identify an internal NSIS branch by themselves.
 
-The current shortcut-diagnostic revision deliberately pauses the expensive
-full-build job after quality and synthetic validation. It exercises inert
-ASCII/Unicode shortcut targets entirely inside the isolated fixture root,
-without executing links or targets or changing Desktop/Start Menu entries.
+The full-build job is restored behind all existing prerequisite gates after
+[quality run 39941746766](https://github.com/crevice0308/PrivacyBrowser/actions/runs/39941746766)
+and [Windows diagnostic run 39941994533](https://github.com/crevice0308/PrivacyBrowser/actions/runs/39941994533)
+passed for source `38655c82009356b6d6ffda1cf61ef1841999fb54`. The latter passed
+all 14 synthetic safety checks and all 21 strict wide shortcut reads across
+ASCII, Unicode and Unicode-with-spaces cases, entirely inside the isolated
+fixture root without executing links or targets or changing Desktop/Start Menu
+entries.
 Bounded readback evidence distinguishes explicit wide ShellLink retrieval from
 WScript retrieval, and direct links from copied ownership snapshots. The
 [ASCII-path control run](https://github.com/crevice0308/PrivacyBrowser/actions/runs/39694415558)
@@ -215,8 +219,8 @@ successful HRESULTs, exact target/profile/icon/working-directory semantics and
 unchanged snapshot/copy bytes remain mandatory. This controlled result is not
 proof that the previous actual installed links were correct: a fresh full
 installer acceptance run and its retained link evidence are still required.
-The full-build pause must be removed in a separately reviewed source change
-after the diagnostic evidence is inspected; it does not authorize publication.
+Restoring the full build does not establish native acceptance or authorize
+publication; the prerelease request remains disabled.
 
 `test_native_installer.ps1` is restricted to a fresh directory on an ephemeral
 GitHub-hosted runner. It checks all installed payload hashes, native metadata,

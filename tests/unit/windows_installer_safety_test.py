@@ -181,14 +181,22 @@ class FastInstallerSafetyTests(unittest.TestCase):
         self.assertIn("contents: read", workflow)
         self.assertNotIn("contents: write", workflow)
 
-    def test_shortcut_diagnostic_revision_pauses_only_the_expensive_build(self):
+    def test_full_build_requires_all_prerequisite_gates_without_bypass(self):
         workflow = (ROOT / ".github/workflows/windows-native.yml").read_text()
         fast_job = workflow.split("\n  installer-safety:\n", 1)[1].split("\n  build:\n", 1)[0]
         build_job = workflow.split("\n  build:\n", 1)[1]
         self.assertNotIn("false &&", fast_job)
-        self.assertIn("Diagnostic-only shortcut revision", build_job)
-        self.assertRegex(build_job, r"if: >-\s+false &&\s+needs\.changes\.outputs\.build_required == 'true'")
-        self.assertIn("needs['installer-safety'].result == 'success'", build_job)
+        self.assertIn("needs: [changes, installer-safety]", build_job)
+        condition = build_job.split("    if: >-\n", 1)[1].split("\n    runs-on:", 1)[0]
+        self.assertEqual(" ".join(condition.split()), " && ".join((
+            "needs.changes.outputs.build_required == 'true'",
+            "needs['installer-safety'].result == 'success'",
+            "github.event.workflow_run.conclusion == 'success'",
+            "github.event.workflow_run.event == 'push'",
+            "github.event.workflow_run.head_branch == 'main'",
+            "github.event.workflow_run.head_repository.full_name == github.repository",
+        )))
+        self.assertIn("timeout-minutes: 360", build_job)
         self.assertEqual(json.loads((ROOT / "config/native-prerelease-request.json").read_text())["enabled"], False)
 
 
