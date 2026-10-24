@@ -251,7 +251,13 @@ class NativeWorkflowTests(unittest.TestCase):
         self.assertEqual(run_mach_bootstrap.BOOTSTRAP_ARGS,
                          ["--no-interactive", "bootstrap", "--application-choice", "browser",
                           "--no-system-changes"])
-        self.assertIn('run_logged bootstrap python3 "$script_dir/run_mach_bootstrap.py"', source)
+        self.assertIn('run_logged bootstrap python3 "$script_dir/supervise_mach_bootstrap.py"', source)
+        self.assertIn('run_logged vsdownload-patch python3 "$script_dir/patch_vsdownload.py"', source)
+        self.assertLess(source.index("run_logged vsdownload-patch"), source.index("run_logged bootstrap python3"))
+        supervisor = (ROOT / "tools/supervise_mach_bootstrap.py").read_text()
+        self.assertIn('run_mach_bootstrap.py', supervisor)
+        self.assertIn('bootstrap.require_source()', supervisor)
+
         self.assertIn("./mach build", source)
         self.assertIn("./mach package", source)
         self.assertNotIn("--enable-artifact-builds", source)

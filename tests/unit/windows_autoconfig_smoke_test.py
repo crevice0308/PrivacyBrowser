@@ -180,6 +180,21 @@ class RetainedTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     self.validate()
 
+    def test_upstream_default_channel_telemetry_override_remains_a_failure(self):
+        # Reproduce the observed native run 40037310115 preference mismatch.
+        # This is an INERT regression, not an assertion of native execution.
+        raw = deepcopy(self.original)
+        for branch in ("default_prefs", "effective_prefs"):
+            self.assertIs(raw["startup"][branch]["toolkit.telemetry.enabled"], False)
+            raw["startup"][branch]["toolkit.telemetry.enabled"] = True
+        checks = smoke.derive_checks(raw, smoke.user_config(raw["port"]),
+                                     raw["native_binary_sha256_before"])
+        self.assertFalse(checks["packaged_autoconfig_defaults_effective"])
+        self.assertFalse(checks["effective_privacy_preference_plan"])
+        self.replace_raw(raw)
+        with self.assertRaises(ValueError):
+            self.validate()
+
     def test_every_default_and_effective_pref_is_type_strict(self):
         for branch in ("default_prefs", "effective_prefs"):
             for key, value in self.original["startup"][branch].items():
