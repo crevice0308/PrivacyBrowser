@@ -104,3 +104,59 @@ python3 tools/integration_test.py --binary /path/to/privacybrowser-dev/firefox \
 ```
 
 Marionette のシステム権限はローカルのテスト用起動に限って使用します。普段のランチャーにテスト権限を付けません。ネイティブ stderr はプロファイルと共に一時領域へ出力し、診断 ZIP に含めません。公開前には通常のデスクトップ環境で日本語 IME、一般サイト、6 キーワードの検索、全分類の実データ再起動検証、完全終了、異常終了、インストール削除、署名、更新失敗復旧、1GB RAM、長時間メモリ測定を追加する必要があります。
+
+## Windows bootstrap download failures
+
+Run [39943171624](https://github.com/crevice0308/PrivacyBrowser/actions/runs/39943171624)
+never reached `mach build`. During bootstrap, repeated incomplete MSVC downloads
+exhausted the vendored downloader's retries. Python could not deserialize its
+`ContentTooShortError` in the multiprocessing result thread, leaving bootstrap
+waiting until the hosted job's six-hour limit.
+
+The native build now applies a SHA-256-pinned, fail-closed correction to the
+reviewed ESR downloader: an exhausted short download remains a failure, but its
+exception can cross the worker-process boundary. Download selection, five
+attempts, upstream payload hash checks, and extraction ordering are unchanged.
+This does not repair an unavailable or truncating download service.
+
+Bootstrap also has a separate 30-minute wall-clock bound. A private stdin
+handshake prevents bootstrap from starting until its child belongs to a Windows
+kill-on-close job object. Timeout or supervisor termination closes that owned
+process tree, not unrelated processes. `bootstrap-supervisor.json` records the
+limit, outcome and bounded error types; `bootstrap-exit.json` still records the
+shell/tee statuses. No automatic retry is added. Source compilation, packaging,
+PE hardening, installer, Places and runtime gates remain mandatory. Windows job
+execution is covered by inert Windows CI fixtures, not claimed from Linux tests.
+
+## Native developer channel and telemetry
+
+Run [40037310115](https://github.com/crevice0308/PrivacyBrowser/actions/runs/40037310115)
+completed bootstrap, Gecko compilation and packaging, but failed the automatic
+startup gate. Its retained default and effective `toolkit.telemetry.enabled`
+values were `true`, contrary to the project's `false` policy. The other observed
+startup checks, including all eight history flags, automatic UI integration,
+content sandbox and Fission, passed. The home and clean-shutdown checks were not
+reached after the startup gate failed; their false summary entries do not prove
+separate home or shutdown defects. This observation does not establish telemetry
+transmission: upload and unified-telemetry preferences were still disabled.
+
+The implicit upstream `default` build channel selects extended telemetry for
+non-official desktop builds. Gecko sets and locks this value after loading default
+preference files. Both native mozconfigs now explicitly select `developer`, the
+existing channel in `config/esr.json`, rather than impersonating an official
+Mozilla release or unlocking the preference at runtime. The channel option does
+not enable the updater; `--disable-updater` and project update restrictions remain
+in place. Source-policy inspection used the signature/hash-verified 153.5.1 ESR
+source; the failing native run itself used 153.5.0 ESR.
+
+Channel-conditioned source inspection found no sandbox or other security
+weakening. Official-build identity and milestone-derived ESR/release feature
+macros are unchanged. The channel appears in diagnostic metadata and new
+dedicated-profile names (`default-developer`); existing installation-to-profile
+selection is keyed by install hash, not this channel. Native profile continuity
+and runtime behavior still require validation, not just this source inspection.
+
+Offline regressions require the explicit channel and unchanged disabled-updater
+configuration and reject the observed telemetry-enabled evidence. The full native
+startup/home/shutdown/installer gates remain mandatory. A fresh native run is
+required to establish the fix; offline tests alone are not Windows runtime proof.

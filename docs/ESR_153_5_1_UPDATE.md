@@ -15,8 +15,8 @@ engine migration. Mozilla's [ESR 153 launch announcement](https://groups.google.
 identified October 13, 2026 as the replacement date for ESR 140. Current metadata
 still lists ESR 153 as the main ESR; no EOL-driven major migration is indicated.
 
-Only the engine pin, matching Windows reviewed-version label, manual source-build
-default, and current instructions are updated. Historical 153.5.0 runtime reports
+The ESR-specific delta updates the engine pin, matching Windows reviewed-version
+label, manual source-build default, and current instructions. Historical 153.5.0 runtime reports
 remain unchanged: they are not evidence of running 153.5.1. ESR/Gecko, UI,
 privacy defaults, signature enforcement, and `release_allowed=false` remain intact.
 
@@ -35,7 +35,7 @@ No trust pin changed.
 - SHA-512: `9dccf8c5383653ddcf807b500889a91f9b9d56a512dab88a2683755ae6cb0c4b5d0788faa9541e5709a2b783002ee9f434020a43c8a43653038a2c3decd9f2c1`
 - Machine-readable evidence: `tests/results/esr-153.5.1-source-verification.json`.
 
-## Verification and remaining gates
+## Initial standalone update verification (before integration)
 
 - Source syntax checks: 26 Python, 12 JavaScript, 4 XML passed.
 - Linux portable Python suite: 413 tests, 407 passed, 6 skipped.
@@ -52,9 +52,27 @@ No trust pin changed.
   output SHA-256 `af337035cc729acdce158fba7845584413dda1033ba89a3c66a91c7e1c5f1741`.
   Both match PR #1's fail-closed pins.
 
-This branch does not import PR #1's Windows bootstrap repair. Its ongoing native
-153.5.0 build must not be described as validation of this update. Before accepting
-a native 153.5.1 candidate, combine the reviewed bootstrap repair through normal
-review and run the complete source build, packaging, installer, runtime, Places,
-and hardening gates against the final combined commit. No source compilation,
-153.5.1 runtime UI test, signing, publication, or release readiness is claimed here.
+The initial standalone update did not include PR #1's Windows bootstrap repair.
+Its 153.5.0 native results were not validation of this update. The subsequent
+reviewed integration is described below; source compilation, runtime acceptance,
+signing, publication and release readiness are not inferred from these earlier
+source-only checks.
+
+## Native integration validation
+
+This update is stacked on draft PR #1, whose ESR 153.5.0 native run
+[40055166027](https://github.com/crevice0308/PrivacyBrowser/actions/runs/40055166027)
+passed at `add174ba829e0a3df47a87e664ebbeea2ce63ba8`. The update branch includes
+that bootstrap failure guard and explicit developer-channel telemetry fix.
+The nonpublishing validation workflow is restricted to this exact ESR update
+branch in this repository; its permissions, pinned actions, full build and
+privacy/security/installer gates remain unchanged. Main and PR #1 are untouched.
+
+The previous successful native result does not validate ESR 153.5.1. A new full
+native run on the combined update tree is required; its outcome must be recorded
+in PR #2 before claiming Windows runtime compatibility. No automatic merge,
+signing, update deployment or release publication is authorized by these tests.
+
+Combined-tree offline checks: 437 Python tests (429 passed, 8 platform/artifact
+skips), 61 Node tests, and syntax checks for 28 Python, 12 JavaScript and 4 XML
+files passed. These are not substitutes for the pending native run.
