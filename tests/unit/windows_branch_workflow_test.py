@@ -11,12 +11,12 @@ class BranchWorkflowTests(unittest.TestCase):
         self.source = (ROOT / '.github/workflows/windows-branch-validation.yml').read_text()
 
     def test_exact_branch_and_repository_only_no_privileged_triggers(self):
-        self.assertIn('branches: [codex/bound-windows-bootstrap]', self.source)
+        self.assertIn('branches: [codex/esr-153-5-1-security]', self.source)
         for job in ('quality', 'installer-safety', 'build'):
             body = self.source.split('  ' + job + ':\n', 1)[1].split('    runs-on:', 1)[0]
             self.assertIn("github.repository == 'crevice0308/PrivacyBrowser'", body)
             self.assertIn("github.event_name == 'push'", body)
-            self.assertIn("github.ref == 'refs/heads/codex/bound-windows-bootstrap'", body)
+            self.assertIn("github.ref == 'refs/heads/codex/esr-153-5-1-security'", body)
         for forbidden in ('pull_request_target:', 'workflow_dispatch:', 'workflow_run:', 'contents: write',
                           'secrets.', 'gh release', 'git push', 'enable-auto-merge'):
             self.assertNotIn(forbidden, self.source)

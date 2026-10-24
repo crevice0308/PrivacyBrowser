@@ -5,7 +5,7 @@ on:
       esr_version:
         description: Stable ESR version; signed upstream archive is mandatory
         required: true
-        default: '153.5.0esr'
+        default: '153.5.1esr'
       target:
         description: Target host (provisioned self-hosted runner required)
         type: choice
