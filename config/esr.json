@@ -2,10 +2,10 @@
   "product": "Privacy Browser",
   "version": "0.1.0",
   "channel": "developer",
-  "upstream_version": "153.5.1esr",
+  "upstream_version": "153.6.0esr",
   "metadata_url": "https://product-details.mozilla.org/1.0/firefox_versions.json",
   "metadata_key": "FIREFOX_ESR",
-  "metadata_observed_utc": "2026-10-23",
+  "metadata_observed_utc": "2026-10-27",
   "release_allowed": false,
   "reason": "Developer overlay; independent source build, signing and cross-platform release validation remain required."
 }

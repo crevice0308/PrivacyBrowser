@@ -41,13 +41,13 @@ upstream updates from replacing the overlay. Current project updates are manual.
 
 ```sh
 python tools/provision_upstream_key.py --output upstream/mozilla-release.gpg
-python tools/update_esr.py fetch --version 153.5.1esr --kind source \
+python tools/update_esr.py fetch --version 153.6.0esr --kind source \
   --destination upstream --keyring upstream/mozilla-release.gpg \
   --fingerprint 14F26682D0916CDD81E37B6D61B7B526D98F0353 \
   --signing-fingerprint 827E658608679618CD349F93678E455D76767AA3
 python tools/extract_source.py \
-  --archive upstream/firefox-153.5.1esr.source.tar.xz \
-  --verification upstream/firefox-153.5.1esr.source.tar.xz.verification.json \
+  --archive upstream/firefox-153.6.0esr.source.tar.xz \
+  --verification upstream/firefox-153.6.0esr.source.tar.xz.verification.json \
   --destination upstream/source
 python tools/prepare_source.py --source upstream/source --target linux
 cd upstream/source

@@ -1,0 +1,59 @@
+{
+  "upstream_version": "153.6.0esr",
+  "kind": "source",
+  "archive": "firefox-153.6.0esr.source.tar.xz",
+  "sha512": "3e9f1f8e7c14d1994f4896702a50b46c1a3c7c7b696a080112f5ab3fdf0fcdd41ade4e81f9abafe2d3824cf1dfb16b5c09e5eaec12a05a733906f1483395565d",
+  "checksum_signer": "14F26682D0916CDD81E37B6D61B7B526D98F0353",
+  "signature_verified": true,
+  "source_url": "https://archive.mozilla.org/pub/firefox/releases/153.6.0esr/source/firefox-153.6.0esr.source.tar.xz",
+  "reviewed_utc": "2026-10-27",
+  "checksum_signing_subkey": "827E658608679618CD349F93678E455D76767AA3",
+  "security_advisory": "https://www.mozilla.org/en-US/security/advisories/mfsa2026-120/",
+  "unchanged_compatibility_sha256": {
+    "python/mozboot/mozboot/bootstrap.py": "25646fa9e755b78f50cedb331a4a9bc778a1b6af39f572d85f4cccd27f6004d6",
+    "python/mozboot/mozboot/mach_commands.py": "ec806ac19717f8becb71851b2dfa1a26e5ef37574ae623da338ec871eb276d22",
+    "taskcluster/kinds/toolchain/rust.yml": "ee1a8a3cb24c9784b1f6764528100279c682a6aa326bbb983a2a81085a3bdd39",
+    "third_party/python/vsdownload/vsdownload.py": "03b990385482f1dcffd6625028b1357a8f420ad19664ded0b038a5b0041f09e9"
+  },
+  "pr1_downloader_patch_after_sha256": "af337035cc729acdce158fba7845584413dda1033ba89a3c66a91c7e1c5f1741",
+  "source_compiled": false,
+  "runtime_tested": false,
+  "source_preparation": {
+    "linux": {
+      "prepared": true,
+      "compiled": false,
+      "target": "linux",
+      "overlay_files": 25,
+      "native_binary": "privacybrowser",
+      "app_name": "PrivacyBrowser",
+      "engine_version": "153.6.0",
+      "upstream_version": "153.6.0esr",
+      "icon_sha256": "5c8ce98799e121f2056b6bd79f1512a640ff8deaf6fa0bf3de254542dab17863",
+      "branding": "independent PrivacyBrowser product names, native resources and icons; Mozilla legal attribution retained",
+      "windows_installer": "upstream NSIS/helper disabled; independent project packaging required",
+      "default_browser_registration": "not provisioned; independent lookup names only",
+      "source_security_features": "default Gecko sandbox, Fission, signature checks and certificate validation retained",
+      "update_service": "disabled until independently signed infrastructure is ready",
+      "native_session_guard": "read and write blocked by default before SessionWriter disk I/O; source compiled validation required",
+      "overlay_sha256": "3ee0c2a6d99b6869146a2ba75d87bb11c7f838546a4106210c3d7c35ddb1517b"
+    },
+    "windows": {
+      "prepared": true,
+      "compiled": false,
+      "target": "windows",
+      "overlay_files": 25,
+      "native_binary": "privacybrowser.exe",
+      "app_name": "PrivacyBrowser",
+      "engine_version": "153.6.0",
+      "upstream_version": "153.6.0esr",
+      "icon_sha256": "5c8ce98799e121f2056b6bd79f1512a640ff8deaf6fa0bf3de254542dab17863",
+      "branding": "independent PrivacyBrowser product names, native resources and icons; Mozilla legal attribution retained",
+      "windows_installer": "upstream NSIS/helper disabled; independent project packaging required",
+      "default_browser_registration": "not provisioned; independent lookup names only",
+      "source_security_features": "default Gecko sandbox, Fission, signature checks and certificate validation retained",
+      "update_service": "disabled until independently signed infrastructure is ready",
+      "native_session_guard": "read and write blocked by default before SessionWriter disk I/O; source compiled validation required",
+      "overlay_sha256": "3ee0c2a6d99b6869146a2ba75d87bb11c7f838546a4106210c3d7c35ddb1517b"
+    }
+  }
+}

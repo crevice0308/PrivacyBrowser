@@ -1,5 +1,7 @@
 # ESR 153.5.1 security update — 2026-10-23
 
+Historical snapshot. The adopted ESR is now 153.6.0; see [current update](ESR_153_6_0_UPDATE.md). The observations below describe the earlier update, not current upstream metadata.
+
 ## Reason and scope
 
 Mozilla's [current-version metadata](https://product-details.mozilla.org/1.0/firefox_versions.json)
