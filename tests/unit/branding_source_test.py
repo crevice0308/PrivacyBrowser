@@ -196,6 +196,23 @@ def FirefoxBranding():
         self.prepare()
         self.assertEqual((self.source / "mozconfig").read_bytes(), configured)
 
+    def test_native_channel_matches_project_without_enabling_updates(self):
+        channel = json.loads((ROOT / "config/esr.json").read_text())["channel"]
+        self.assertEqual(channel, "developer")
+        # The upstream default/non-official channel forcibly enables and locks
+        # extended telemetry after JS defaults load. Never silently fall back.
+        for target in ("windows", "linux"):
+            with self.subTest(target=target):
+                configured = (ROOT / f"config/mozconfig.{target}").read_text()
+                lines = [line.strip() for line in configured.splitlines()
+                         if line.strip() and not line.lstrip().startswith("#")]
+                self.assertEqual([line for line in lines if "--enable-update-channel" in line],
+                                 [f"ac_add_options --enable-update-channel={channel}"])
+                self.assertIn("ac_add_options --disable-updater", lines)
+                self.assertIn("ac_add_options --disable-official-branding", lines)
+                self.assertNotIn("export MOZILLA_OFFICIAL=1", lines)
+                self.assertIn("export MOZ_APP_REMOTINGNAME=privacybrowser", lines)
+
     def test_native_product_fields_and_engine_identity(self):
         result = self.prepare()
         self.assertIn('MOZ_APP_DISPLAYNAME="PrivacyBrowser"', (self.target / "configure.sh").read_text())

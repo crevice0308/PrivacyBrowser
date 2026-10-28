@@ -93,8 +93,11 @@ export RUSTC="$(cygpath -m "$rust_bin/rustc.exe")"
 export CARGO="$(cygpath -m "$rust_bin/cargo.exe")"
 
 # The pinned auto-bootstrap sandbox swallows configure errors in StringIO.
-# This logging-only wrapper runs the unchanged mach with those exact arguments.
-run_logged bootstrap python3 "$script_dir/run_mach_bootstrap.py"
+# Keep the unchanged bootstrap arguments/logging, but bound its owned process
+# tree so a failed downloader result thread cannot consume the six-hour job.
+# Fail closed on any changed downloader; truncated payloads remain failures.
+run_logged vsdownload-patch python3 "$script_dir/patch_vsdownload.py"
+run_logged bootstrap python3 "$script_dir/supervise_mach_bootstrap.py"
 run_logged bootstrap-config-check cmp mozconfig "$evidence/mozconfig.before-bootstrap"
 
 # Archive mode permits missing Windows auxiliary tools. Keep winchecksec
