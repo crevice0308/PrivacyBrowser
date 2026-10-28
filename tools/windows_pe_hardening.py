@@ -8,7 +8,9 @@ import sys
 
 import verify_windows_native as native
 
-TOOL_SHA256 = "145eec7603b55008b59c4fbcaf2fb1be23e481d28828a67d3dddb6842e8fc10b"
+# Reviewed against source-resolved official task/CoT and independent archive.
+# See tests/results/winchecksec-2026-10-28-review.json; never accept runtime drift.
+TOOL_SHA256 = "e63d6ccac4402d17494c60826a52051b50c7a2861b60742e3ed090a41f8a9277"
 TOOL_SOURCE_REVISION = "93ffe67dbfc757bf6f440d80b8acf88e652ed60a"
 # Exact x64 expectations in the pinned Gecko build/win32/autowinchecksec.py.
 # Its pinned winchecksec 1.1.2 emits a flat boolean object, not the v3 schema.
@@ -65,10 +67,16 @@ def validate_retained(evidence, runtime):
     return report
 
 
-def collect(work):
-    evidence, runtime = work / "evidence", work / "candidate/PrivacyBrowser"
+def verified_tool(work):
+    """Hash only, before compilation or inspection; never launch the tool."""
     tool = native.regular_file(work, "mozbuild/winchecksec/winchecksec.exe")
     native.require(native.digest(tool) == TOOL_SHA256, "Winchecksec binary differs from the reviewed tool")
+    return tool
+
+
+def collect(work):
+    evidence, runtime = work / "evidence", work / "candidate/PrivacyBrowser"
+    tool = verified_tool(work)
     records = {}
     for name in BINARIES:
         binary = native.regular_file(runtime, name)
@@ -101,11 +109,18 @@ def collect(work):
 
 
 def main():
-    native.require(len(sys.argv) == 1, "PE hardening inspection does not accept path overrides")
+    native.require(sys.argv[1:] in ([], ["--verify-tool"]), "PE hardening inspection does not accept path overrides")
     native.require(os.name == "nt" and os.environ.get("GITHUB_ACTIONS") == "true"
                    and os.environ.get("RUNNER_ENVIRONMENT") == "github-hosted",
                    "PE inspection executes only on the ephemeral hosted Windows runner")
-    collect(Path(r"D:\pb"))
+    work = Path(r"D:\pb")
+    if sys.argv[1:] == ["--verify-tool"]:
+        verified_tool(work)
+        print(json.dumps({"schema_version": 1, "verified": True,
+                          "tool_sha256": TOOL_SHA256, "tool_source_revision": TOOL_SOURCE_REVISION,
+                          "tool_executed": False, "candidate_executed": False}))
+    else:
+        collect(work)
 
 
 if __name__ == "__main__":

@@ -56,3 +56,39 @@ and artifact inspection will be recorded in PR #2 after completion. Until then,
 compilation, startup/rendering, Places, PE hardening and installer acceptance for
 153.6.0 are pending, not inferred from portable tests. `release_allowed=false`
 and all signing/publication restrictions remain unchanged.
+
+## First native attempt and reviewed inspector refresh
+
+[Run40604947567](https://github.com/crevice0308/PrivacyBrowser/actions/runs/40604947567)
+at `7e10f8d` completed bootstrap, full Gecko compilation and packaging successfully.
+Its source evidence matches the signed153.6.0 archive above. The91-file native
+identity/resource/overlay static checks passed, but the separate PE-hardening
+inspection correctly refused a winchecksec binary differing from the previously
+reviewed hash. Runtime/Places/installer checks were not reached; no candidate was
+uploaded. Diagnostics archive12788922549 SHA-256 was independently verified as
+`cb69703daa0069464571bce5911c85fe80ba0accbb9f9b1d44cfd20d164bffac`.
+
+The new tool hash was **not** accepted solely because the failed run reported it.
+The authenticated ESR source independently resolved official Mozilla toolchain
+task `E68VbgMJScqsU_6wWla6Bw`. Its separately downloaded archive SHA-256 matched
+same-task official HTTPS chain-of-trust metadata; that metadata's task definition
+also exactly matched the official task API. The archive contains only the283648-byte
+`winchecksec/winchecksec.exe`, whose SHA-256 matches the failed runner's observation.
+Its source-fetch dependency explicitly uses the unchanged reviewed upstream
+revision `93ffe67dbfc757bf6f440d80b8acf88e652ed60a`. Source definitions, build recipe
+and JSON/check schema are byte-identical between153.5.1 and153.6.0; no checker
+source/schema change was found. The precise reason for the changed build bytes
+is not claimed as independently reproduced.
+
+The exact reviewed executable pin is now
+`e63d6ccac4402d17494c60826a52051b50c7a2861b60742e3ed090a41f8a9277`.
+`tests/results/winchecksec-2026-10-28-review.json` retains task/archive/source
+identities and hashes. Metadata trust is official Mozilla HTTPS; a detached CoT
+signature and reproducible binary build were **not** independently verified.
+The downloaded EXE was inspected only as data locally, never executed.
+
+The same strict pin is now checked immediately after bootstrap **before** expensive
+compilation, and again before post-package inspection. Unknown hashes still fail;
+all eight PE checks, source/trust pins, runtime/installer gates and nonpublication
+policy remain unchanged. A fresh native run must validate the repaired exact tree;
+the failed first attempt is not runtime acceptance evidence.

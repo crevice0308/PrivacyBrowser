@@ -103,6 +103,8 @@ run_logged bootstrap-config-check cmp mozconfig "$evidence/mozconfig.before-boot
 # Archive mode permits missing Windows auxiliary tools. Keep winchecksec
 # mandatory so upstream PE mitigation checks are not silently omitted.
 run_logged winchecksec-hash sha256sum "$PB_WORK_UNIX/mozbuild/winchecksec/winchecksec.exe"
+# Fail closed on tool drift before spending hours compiling a candidate.
+run_logged winchecksec-integrity python3 "$script_dir/windows_pe_hardening.py" --verify-tool
 export WINCHECKSEC="$work_windows/mozbuild/winchecksec/winchecksec.exe"
 # PDBSTR is upstream's optional PDB source-indexing tool in source-archive
 # mode. Configure records its detection; we do not claim source-indexed PDBs.

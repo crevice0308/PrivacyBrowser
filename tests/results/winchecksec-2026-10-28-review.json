@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "task_id": "E68VbgMJScqsU_6wWla6Bw",
+  "task_url": "https://firefox-ci-tc.services.mozilla.com/api/queue/v1/task/E68VbgMJScqsU_6wWla6Bw",
+  "source_fetch_task_id": "Jikvd_s-TY6ViMEkJ4DHmg",
+  "source_revision": "93ffe67dbfc757bf6f440d80b8acf88e652ed60a",
+  "archive_sha256": "0d7ecd07cc3f3e78390f67451b0a70c594430ec8b6dcd1d1cff4c785f79172a6",
+  "binary_sha256": "e63d6ccac4402d17494c60826a52051b50c7a2861b60742e3ed090a41f8a9277",
+  "binary_bytes": 283648,
+  "archive_bytes": 96353,
+  "cot_matches_task_definition": true,
+  "cot_matches_archive": true,
+  "binary_matches_native_diagnostics": true,
+  "source_manifest_from_authenticated_esr": "153.6.0esr",
+  "same_recipe_and_checks_as_esr153_5_1": true,
+  "metadata_trust": "official Mozilla Taskcluster HTTPS; detached CoT signature not independently verified",
+  "binary_executed": false,
+  "files": {
+    "artifact-manifest.json": "2985923a9d290ef4b3c0be47bed1cbda020f1a5194b9c23ee48f627cd7a514c0",
+    "task.json": "58f16b6911c08eb368be5b75c96d4c18c7ef945d46b28ddea08f11a641e8e716",
+    "cot.json": "65ef546561984bee4ca3bf7370261604ea2e4dcc5c4437e799427a029eff0416",
+    "source-fetch-task.json": "72b0b70a02ce24bc6c32f030dfb098e076bf7493bc39ad2faf7fef5a3cb43d8e"
+  },
+  "reviewed_utc": "2026-10-28",
+  "previous_binary_sha256": "145eec7603b55008b59c4fbcaf2fb1be23e481d28828a67d3dddb6842e8fc10b",
+  "failure_run_id": 40604947567,
+  "source_definition_sha256": {
+    "taskcluster/kinds/toolchain/misc.yml": "00144dae37ffa273ca16e1b35f710e0610585f207c6be4ddc98552d9e9fb2084",
+    "taskcluster/kinds/fetch/toolchains.yml": "d6a018405cacec304eea7eb51cb16d79097c5d93080642b8699422cd8977056b",
+    "taskcluster/scripts/misc/build-winchecksec.sh": "0980404174ebda32f590ecc800cdda181487f5a845df22434047a6502819c57e",
+    "build/win32/autowinchecksec.py": "c83451d472c066214a7fb21615ae31cfb7c11a91eaa7689ec1ef800bf795e04c"
+  },
+  "artifact_url": "https://firefox-ci-tc.services.mozilla.com/api/queue/v1/task/E68VbgMJScqsU_6wWla6Bw/artifacts/public%2Fbuild%2Fwinchecksec.tar.zst",
+  "cot_url": "https://firefox-ci-tc.services.mozilla.com/api/queue/v1/task/E68VbgMJScqsU_6wWla6Bw/artifacts/public%2Fchain-of-trust.json",
+  "hardening_checks_unchanged": [
+    "aslr",
+    "cfg",
+    "dynamicBase",
+    "gs",
+    "isolation",
+    "nx",
+    "seh",
+    "highEntropyVA"
+  ],
+  "release_eligible": false
+}
