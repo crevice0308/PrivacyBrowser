@@ -14,12 +14,21 @@ import windows_pe_hardening as hardening
 
 
 class PEHardeningTests(unittest.TestCase):
-    def test_reviewed_source_and_binary_pin_are_unchanged(self):
+    def test_reviewed_source_and_binary_pins_are_explicit(self):
         # setUp replaces the executable digest with inert fixture bytes; inspect
         # the checked-in constant without running or downloading the real tool.
         source = (ROOT / "tools/windows_pe_hardening.py").read_text(encoding="utf-8")
-        self.assertIn('TOOL_SHA256 = "145eec7603b55008b59c4fbcaf2fb1be23e481d28828a67d3dddb6842e8fc10b"', source)
+        self.assertIn('TOOL_SHA256 = "e63d6ccac4402d17494c60826a52051b50c7a2861b60742e3ed090a41f8a9277"', source)
         self.assertEqual(hardening.TOOL_SOURCE_REVISION, "93ffe67dbfc757bf6f440d80b8acf88e652ed60a")
+        evidence = json.loads((ROOT / "tests/results/winchecksec-2026-10-28-review.json").read_text())
+        self.assertIn('TOOL_SHA256 = "' + evidence["binary_sha256"] + '"', source)
+        self.assertEqual(evidence["source_revision"], hardening.TOOL_SOURCE_REVISION)
+        self.assertTrue(evidence["cot_matches_archive"])
+        self.assertTrue(evidence["cot_matches_task_definition"])
+        self.assertFalse(evidence["binary_executed"])
+        self.assertFalse(evidence["release_eligible"])
+        self.assertEqual(set(evidence["hardening_checks_unchanged"]), set(hardening.CHECKS))
+
         self.assertEqual(set(hardening.CHECKS), {"aslr", "cfg", "dynamicBase", "gs", "isolation", "nx", "seh", "highEntropyVA"})
 
     def setUp(self):
@@ -65,6 +74,28 @@ class PEHardeningTests(unittest.TestCase):
         report = hardening.validate_retained(self.evidence, self.runtime)
         self.assertFalse(report["candidate_executed"])
         self.assertTrue(report["passed"])
+
+    def test_cli_rejects_unreviewed_arguments_before_inspection(self):
+        for args in (["--verify-tool", "other"], ["--path", "other"], ["--skip-integrity"]):
+            with self.subTest(args=args), mock.patch.object(sys, "argv", ["hardening", *args]), \
+                    mock.patch.object(hardening, "collect") as collect, \
+                    mock.patch.object(hardening, "verified_tool") as verify:
+                with self.assertRaises(ValueError):
+                    hardening.main()
+                collect.assert_not_called()
+                verify.assert_not_called()
+
+    def test_hash_only_preflight_never_executes_tool_or_candidate(self):
+        with mock.patch.object(hardening.subprocess, "run") as run:
+            self.assertEqual(hardening.verified_tool(self.work), self.tool)
+            self.tool.write_bytes(b"changed inert tool")
+            with self.assertRaises(ValueError):
+                hardening.verified_tool(self.work)
+            run.assert_not_called()
+        self.assertEqual(list(self.evidence.iterdir()), [])
+        shell = (ROOT / "tools/build_windows_native.sh").read_text()
+        self.assertIn('run_logged winchecksec-integrity python3 "$script_dir/windows_pe_hardening.py" --verify-tool', shell)
+        self.assertLess(shell.index("run_logged winchecksec-integrity"), shell.index("run_logged build ./mach"))
 
     def test_changed_tool_is_rejected_before_execution(self):
         self.tool.write_bytes(b"different inert tool")

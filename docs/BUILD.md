@@ -21,7 +21,7 @@
 python3 tools/update_esr.py check --output reports/esr-observation.json
 python3 tools/provision_upstream_key.py --output upstream/mozilla-release.gpg
 python3 tools/update_esr.py fetch \
-  --version 153.5.0esr --kind linux --destination upstream \
+  --version 153.6.0esr --kind linux --destination upstream \
   --keyring upstream/mozilla-release.gpg \
   --fingerprint 14F26682D0916CDD81E37B6D61B7B526D98F0353 \
   --signing-fingerprint 827E658608679618CD349F93678E455D76767AA3
@@ -73,13 +73,13 @@ sudo dpkg -r privacy-browser-dev-bootstrap
 
 ```sh
 python3 tools/update_esr.py fetch \
-  --version 153.5.0esr --kind source --destination upstream \
+  --version 153.6.0esr --kind source --destination upstream \
   --keyring upstream/mozilla-release.gpg \
   --fingerprint 14F26682D0916CDD81E37B6D61B7B526D98F0353 \
   --signing-fingerprint 827E658608679618CD349F93678E455D76767AA3
 python3 tools/extract_source.py \
-  --archive upstream/firefox-153.5.0esr.source.tar.xz \
-  --verification upstream/firefox-153.5.0esr.source.tar.xz.verification.json \
+  --archive upstream/firefox-153.6.0esr.source.tar.xz \
+  --verification upstream/firefox-153.6.0esr.source.tar.xz.verification.json \
   --destination upstream/source
 python3 tools/prepare_source.py --source upstream/source --target linux
 cd upstream/source

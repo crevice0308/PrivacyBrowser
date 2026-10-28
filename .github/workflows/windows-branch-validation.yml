@@ -4,7 +4,7 @@ name: Branch-only unpublished Windows validation
 # The main-only native and prerelease workflows remain unchanged.
 on:
   push:
-    branches: [codex/bound-windows-bootstrap]
+    branches: [codex/esr-153-5-1-security]
 
 permissions:
   contents: read
@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   quality:
-    if: github.repository == 'crevice0308/PrivacyBrowser' && github.event_name == 'push' && github.ref == 'refs/heads/codex/bound-windows-bootstrap'
+    if: github.repository == 'crevice0308/PrivacyBrowser' && github.event_name == 'push' && github.ref == 'refs/heads/codex/esr-153-5-1-security'
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -68,7 +68,7 @@ jobs:
 
   installer-safety:
     needs: quality
-    if: github.repository == 'crevice0308/PrivacyBrowser' && github.event_name == 'push' && github.ref == 'refs/heads/codex/bound-windows-bootstrap'
+    if: github.repository == 'crevice0308/PrivacyBrowser' && github.event_name == 'push' && github.ref == 'refs/heads/codex/esr-153-5-1-security'
     runs-on: windows-2025
     timeout-minutes: 15
     steps:
@@ -99,7 +99,7 @@ jobs:
 
   build:
     needs: [quality, installer-safety]
-    if: github.repository == 'crevice0308/PrivacyBrowser' && github.event_name == 'push' && github.ref == 'refs/heads/codex/bound-windows-bootstrap'
+    if: github.repository == 'crevice0308/PrivacyBrowser' && github.event_name == 'push' && github.ref == 'refs/heads/codex/esr-153-5-1-security'
     runs-on: windows-2025
     timeout-minutes: 360
     steps:
